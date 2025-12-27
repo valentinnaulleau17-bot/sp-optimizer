@@ -395,36 +395,47 @@ def mc_paths_gbm_corr(S0: pd.Series, mu: pd.Series, sigma: np.ndarray, corr: np.
     return S, tickers
 
 
-def compute_smart_mu(fund: pd.DataFrame, score: pd.Series, rf: float, erp: float, k_alpha: float, lambda_val: float):
+def compute_smart_mu(
+    fund: pd.DataFrame,
+    score: pd.Series,
+    rf: float,
+    erp: float,
+    k_alpha: float,
+    lambda_val: float
+):
+    # --- Normalisation
     if isinstance(fund, pd.Series):
         fund = fund.to_frame().T
-    
+
     df = fund.copy()
     df["score"] = score.reindex(df.index)
 
-    beta_raw = df.get("Beta")
+    # --- Beta (toujours Series)
+    if "Beta" not in df.columns:
+        df["Beta"] = np.nan
 
-    if np.isscalar(beta_raw):
-        beta = pd.Series(beta_raw, index=df.index)
-    else:
-        beta = beta_raw
+    beta = pd.to_numeric(df["Beta"], errors="coerce")
 
-    beta_raw = df.get("Beta", np.nan)
+    if np.isscalar(beta):
+        beta = pd.Series(beta, index=df.index)
 
-    # Cas 1: Beta est un scalaire (numpy.float64 / float / int) -> pas de fillna/clip pandas
-    if np.isscalar(beta_raw):
-        beta_val = float(beta_raw)
-        if not np.isfinite(beta_val):
-            beta_val = 1.0
-        beta = float(np.clip(beta_val, 0.0, 3.0))
+    beta = beta.fillna(1.0).clip(0.0, 3.0)
 
-    # Cas 2: Beta est une Series -> traitement normal pandas
-    else:
-        beta = (
-            pd.to_numeric(beta_raw, errors="coerce")
-            .fillna(1.0)
-            .clip(0.0, 3.0)
-        )
+    # --- Score normalisé
+    sc = pd.to_numeric(df["score"], errors="coerce")
+    sc_z = (sc - sc.mean()) / (sc.std(ddof=0) + 1e-12)
+    alpha = float(k_alpha) * sc_z.fillna(0.0)
+
+    # --- Espérance CAPM + alpha + mean reversion
+    mu_capm = rf + beta * erp
+    mu_smart = mu_capm + alpha
+
+    if lambda_val > 0:
+        mu_smart = (1.0 - lambda_val) * mu_smart + lambda_val * mu_capm.mean()
+
+    # --- GARANTIE: on retourne toujours une Series
+    mu_smart = pd.to_numeric(mu_smart, errors="coerce").fillna(rf + erp)
+    return mu_smart
 
 
 def portfolio_projection_from_asset_paths(S_paths: np.ndarray, tickers: list[str], S0: pd.Series,
