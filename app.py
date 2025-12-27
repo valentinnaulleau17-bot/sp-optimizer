@@ -396,26 +396,35 @@ def mc_paths_gbm_corr(S0: pd.Series, mu: pd.Series, sigma: np.ndarray, corr: np.
 
 
 def compute_smart_mu(fund: pd.DataFrame, score: pd.Series, rf: float, erp: float, k_alpha: float, lambda_val: float):
+    if isinstance(fund, pd.Series):
+        fund = fund.to_frame().T
+    
     df = fund.copy()
     df["score"] = score.reindex(df.index)
 
-    beta = pd.to_numeric(df.get("Beta"), errors="coerce").fillna(1.0).clip(0.0, 3.0)
+    beta_raw = df.get("Beta")
 
-    sc = pd.to_numeric(df["score"], errors="coerce")
-    sc_z = (sc - sc.mean()) / (sc.std(ddof=0) + 1e-12)
-    alpha = (float(k_alpha) * sc_z).fillna(0.0)
-
-    pe = pd.to_numeric(df.get("PE_TTM"), errors="coerce")
-    pe = pe.where(pe > 0)
-    pe_target = np.nanmedian(pe.values) if np.isfinite(np.nanmedian(pe.values)) else np.nan
-    if np.isfinite(pe_target):
-        val = float(lambda_val) * np.log(pe_target / pe)
-        val = val.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    if np.isscalar(beta_raw):
+        beta = pd.Series(beta_raw, index=df.index)
     else:
-        val = pd.Series(0.0, index=df.index)
+        beta = beta_raw
 
-    mu = float(rf) + beta * float(erp) + alpha + val
-    return mu.clip(-0.50, 0.50)
+    beta_raw = df.get("Beta", np.nan)
+
+    # Cas 1: Beta est un scalaire (numpy.float64 / float / int) -> pas de fillna/clip pandas
+    if np.isscalar(beta_raw):
+        beta_val = float(beta_raw)
+        if not np.isfinite(beta_val):
+            beta_val = 1.0
+        beta = float(np.clip(beta_val, 0.0, 3.0))
+
+    # Cas 2: Beta est une Series -> traitement normal pandas
+    else:
+        beta = (
+            pd.to_numeric(beta_raw, errors="coerce")
+            .fillna(1.0)
+            .clip(0.0, 3.0)
+        )
 
 
 def portfolio_projection_from_asset_paths(S_paths: np.ndarray, tickers: list[str], S0: pd.Series,
