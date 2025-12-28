@@ -1025,7 +1025,7 @@ if do_run:
         S0C = pricesC.iloc[-1].astype(float)
 
         ST, tickersC = mc_terminal_gbm_corr(
-            S0C=S0C.reindex(candidates),
+            S0=S0C.reindex(candidates),
             mu=mu_smart_C.reindex(candidates),
             sigma=sigmaC,
             corr=corrC,
