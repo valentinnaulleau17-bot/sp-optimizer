@@ -340,6 +340,26 @@ def adjust_corr(corr: np.ndarray, shrink: float):
     np.fill_diagonal(out, 1.0)
     return np.clip(out, -0.99, 0.99)
 
+def mc_terminal_gbm_corr(S0: pd.Series, mu: pd.Series, sigma: np.ndarray, corr: np.ndarray,
+                        years: float, n_sims: int, seed: int):
+    rng = np.random.default_rng(seed)
+    tickers = list(S0.index)
+    n = len(tickers)
+
+    L = _safe_cholesky(corr)
+    T = float(years)
+
+    Z = rng.standard_normal((n_sims, n)) @ L.T
+
+    mu_vec = np.asarray(mu, dtype=float)
+    sig_vec = np.asarray(sigma, dtype=float)
+
+    drift = (mu_vec - 0.5 * sig_vec**2) * T
+    diffusion = sig_vec * np.sqrt(T) * Z
+
+    ST = S0.values[None, :] * np.exp(drift[None, :] + diffusion)
+    return ST, tickers
+
 
 def compute_sigma_and_corr(returns_df: pd.DataFrame, vol_mult: float, corr_shrink: float):
     cov_annual = returns_df.cov() * TRADING_DAYS
@@ -1004,18 +1024,17 @@ if do_run:
         sigmaC, corrC = compute_sigma_and_corr(returnsC, vol_mult=vol_mult, corr_shrink=corr_shrink)
         S0C = pricesC.iloc[-1].astype(float)
 
-        S_paths_C, tickersC = mc_paths_gbm_corr(
-            S0=S0C.reindex(candidates),
+        ST, tickersC = mc_terminal_gbm_corr(
+            S0C=S0C.reindex(candidates),
             mu=mu_smart_C.reindex(candidates),
             sigma=sigmaC,
             corr=corrC,
             years=float(years_fwd),
-            steps_per_year=TRADING_DAYS,
             n_sims=int(n_sims),
             seed=42
         )
 
-        terminal_prices = pd.DataFrame(S_paths_C[:, -1, :], columns=tickersC)
+        terminal_prices = pd.DataFrame(ST, columns=tickersC)
         terminal_returns = terminal_prices.div(S0C.reindex(tickersC), axis=1) - 1.0
 
         E = terminal_returns.mean(axis=0)
