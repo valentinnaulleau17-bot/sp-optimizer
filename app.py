@@ -198,69 +198,9 @@ st.markdown(f"""
 
 
 # ============================================================
-# GEOGRAPHIC UNIVERSE
+# GEOGRAPHIC UNIVERSE  (imported from universe.py)
 # ============================================================
-UNIVERSE = {
-    "Americas": {
-        "🇺🇸 US Large Cap": ["AAPL","MSFT","NVDA","AMZN","GOOGL","META","BRK-B","JPM","JNJ","V",
-                              "UNH","XOM","PG","MA","HD","CVX","ABBV","LLY","MRK","PEP"],
-        "🇺🇸 US Mid Cap": ["DECK","NVR","TRGP","PODD","EG","MANH","ELS","TXRH","SAIA","FICO"],
-        "🇺🇸 US Small Cap": ["BOOT","CELH","LBRT","SPSC","CRVL","QLYS","SWI","PRGS","WTS","BJ"],
-        "🇧🇷 Brazil": ["VALE","PBR","ITUB","BBDC4.SA","PETR4.SA","ABEV3.SA","B3SA3.SA","WEGE3.SA"],
-        "🇨🇦 Canada": ["RY","TD","ENB","CNR","BNS","BMO","TRP","CP","MFC","SU"],
-        "🇲🇽 Mexico": ["AMXL.MX","FEMSA","WALMEX.MX","GFINBURO.MX","BIMBOA.MX","GMEXICOB.MX"],
-    },
-    "France": {
-        "🇫🇷 CAC 40": ["MC.PA","TTE.PA","SAN.PA","AIR.PA","BNP.PA","OR.PA","RI.PA","SU.PA",
-                        "DG.PA","AI.PA","ACA.PA","ENGI.PA","SGO.PA","ORA.PA","VIE.PA",
-                        "LR.PA","CAP.PA","BN.PA","KER.PA","PUB.PA"],
-        "🇫🇷 Mid Cap": ["ALSTOM.PA","BIOCAD.PA","COFA.PA","DBV.PA","ABCA.PA","FP.PA"],
-    },
-    "Germany": {
-        "🇩🇪 DAX": ["SAP","SIE.DE","ALV.DE","MUV2.DE","DTE.DE","BMW.DE","MBG.DE","BAYN.DE",
-                    "BAS.DE","VOW3.DE","RWE.DE","DB1.DE","HEI.DE","IFX.DE","HEN3.DE",
-                    "DHER.DE","EOAN.DE","PAH3.DE","QIA.DE","ZAL.DE"],
-    },
-    "United Kingdom": {
-        "🇬🇧 FTSE 100": ["AZN.L","SHEL.L","HSBA.L","ULVR.L","BP.L","RIO.L","GSK.L","BATS.L",
-                          "LLOY.L","BARC.L","VOD.L","DGE.L","NG.L","LSEG.L","IMB.L",
-                          "CPG.L","RKT.L","AAL.L","PRU.L","WPP.L"],
-    },
-    "Spain": {
-        "🇪🇸 IBEX 35": ["ITX.MC","SAN.MC","BBVA.MC","IBE.MC","REP.MC","TEF.MC","CLNX.MC",
-                         "ACS.MC","ELE.MC","GRF.MC","FER.MC","MAP.MC","MTS.MC","AENA.MC","CABK.MC"],
-    },
-    "Italy": {
-        "🇮🇹 FTSE MIB": ["ENI.MI","ENEL.MI","ISP.MI","UCG.MI","TIT.MI","ATL.MI","STM.MI",
-                           "MB.MI","G.MI","LDO.MI","BAMI.MI","PIRC.MI","AMP.MI","CPR.MI","TRN.MI"],
-    },
-    "Europe (Full)": {
-        "🌍 Eurozone": ["ASML","LVMH","SAP","NOVO-B.CO","SIE.DE","TotalEnergies","AZN.L",
-                        "ROG.SW","NESN.SW","NOVN.SW","ABB.SW","UBS","CS"],
-        "🇸🇪 Sweden": ["VOLV-B.ST","ERIC-B.ST","SHB-A.ST","SWED-A.ST","SKA-B.ST","INVE-B.ST"],
-        "🇳🇱 Netherlands": ["ASML","AD.AS","PHIA.AS","HEIA.AS","NN.AS","RDSA.AS"],
-        "🇨🇭 Switzerland": ["ROG.SW","NESN.SW","NOVN.SW","ABB.SW","LONN.SW","CFR.SW"],
-    },
-    "Asia & Middle East": {
-        "🇯🇵 Japan": ["7203.T","6758.T","8306.T","9432.T","4502.T","6861.T","8058.T","7267.T","6902.T","4063.T"],
-        "🇨🇳 China": ["BABA","JD","PDD","BIDU","NIO","XPEV","LI","TCEHY","NTES","BILI"],
-        "🇮🇳 India": ["INFY","WIT","HDB","IBN","SIFY","ICICIB","AXISB","TATASTEEL.NS"],
-        "🇰🇷 South Korea": ["005930.KS","000660.KS","035420.KS","051910.KS","005380.KS"],
-        "🇸🇬 Singapore": ["D05.SI","O39.SI","U11.SI","Z74.SI","C6L.SI"],
-        "🇸🇦 Saudi Arabia / Gulf": ["2222.SR","1120.SR","2010.SR","1150.SR","SABIC"],
-        "🇷🇺 Russia (ADR/intl)": ["SBER","GAZP","LUKOY","ROSN","NVTK"],
-    },
-}
-
-ALL_REGIONS = list(UNIVERSE.keys())
-
-# Flatten universe to get all tickers
-def get_tickers_for_regions(regions: list) -> list:
-    tickers = []
-    for region in regions:
-        for subgroup, tkrs in UNIVERSE.get(region, {}).items():
-            tickers.extend(tkrs)
-    return list(dict.fromkeys(tickers))  # deduplicate preserving order
+from universe import UNIVERSE, ALL_REGIONS, get_tickers_for_regions
 
 
 # ============================================================
@@ -282,20 +222,65 @@ def fetch_prices(tickers: tuple, start: str, end: str) -> pd.DataFrame:
         st.error(f"Data fetch error: {e}")
         return pd.DataFrame()
 
-@st.cache_data(show_spinner=False, ttl=3600)
+@st.cache_data(show_spinner=False, ttl=86400)
 def fetch_ff3_factors(start: str, end: str) -> pd.DataFrame:
     """
-    Fetch Ken French 3-factor data via pandas_datareader (Fama-French library).
-    Returns daily Mkt-RF, SMB, HML, RF columns.
+    Build proxy Fama-French 3-factor series from freely available ETF data via yfinance.
+    No external data provider required — works on Streamlit Cloud.
+
+    Proxies:
+      Mkt-RF  = SPY daily return − RF (daily)
+      SMB     = IWM (small cap) − IWB (large cap)   [size factor]
+      HML     = IVE (value)     − IVW (growth)      [value factor]
+      RF      = SHY daily return (short-term T-bills proxy)
     """
     try:
-        import pandas_datareader.data as web
-        ff = web.DataReader("F-F_Research_Data_Factors_daily", "famafrench",
-                            start=start, end=end)[0]
-        ff = ff / 100.0
-        ff.index = pd.to_datetime(ff.index)
+        etfs = ["SPY", "IWM", "IWB", "IVE", "IVW", "SHY"]
+        raw = yf.download(etfs, start=start, end=end,
+                          auto_adjust=True, progress=False)
+        if isinstance(raw.columns, pd.MultiIndex):
+            prices = raw["Close"]
+        else:
+            prices = raw
+
+        prices = prices.dropna(how="all")
+        rets = prices.pct_change().dropna()
+
+        available = rets.columns.tolist()
+
+        # RF proxy
+        if "SHY" in available:
+            rf_daily = rets["SHY"]
+        else:
+            rf_daily = pd.Series(0.04 / 252, index=rets.index)
+
+        # Market excess return
+        if "SPY" in available:
+            mkt_rf = rets["SPY"] - rf_daily
+        else:
+            return pd.DataFrame()
+
+        # SMB: small minus large
+        if "IWM" in available and "IWB" in available:
+            smb = rets["IWM"] - rets["IWB"]
+        else:
+            smb = pd.Series(0.0, index=rets.index)
+
+        # HML: value minus growth
+        if "IVE" in available and "IVW" in available:
+            hml = rets["IVE"] - rets["IVW"]
+        else:
+            hml = pd.Series(0.0, index=rets.index)
+
+        ff = pd.DataFrame({
+            "Mkt-RF": mkt_rf,
+            "SMB": smb,
+            "HML": hml,
+            "RF": rf_daily,
+        }).dropna()
         return ff
-    except Exception:
+
+    except Exception as e:
         return pd.DataFrame()
 
 
@@ -698,16 +683,28 @@ def fama_french_regression(port_ret: pd.Series, ff_data: pd.DataFrame) -> dict:
 # ============================================================
 
 PLOTLY_TEMPLATE = dict(
-    plot_bgcolor="white",
-    paper_bgcolor="white",
-    font=dict(family="Inter, sans-serif", color=TEXT_DARK),
+    plot_bgcolor="#FFFFFF",
+    paper_bgcolor="#FFFFFF",
+    font=dict(family="Inter, sans-serif", color="#1C1C2E", size=12),
     colorway=[PRIMARY, ACCENT, SUCCESS, WARNING, "#9B59B6", "#1ABC9C", "#E67E22"],
-    xaxis=dict(showgrid=True, gridcolor="#F1F5F9", linecolor="#E2E8F0"),
-    yaxis=dict(showgrid=True, gridcolor="#F1F5F9", linecolor="#E2E8F0"),
-    legend=dict(bgcolor="rgba(255,255,255,0.9)", bordercolor="#E2E8F0",
-                borderwidth=1, orientation="h", yanchor="bottom", y=1.02,
-                xanchor="right", x=1),
-    margin=dict(l=20, r=20, t=40, b=20),
+    xaxis=dict(
+        showgrid=True, gridcolor="#E8ECF0", linecolor="#CBD5E1",
+        tickfont=dict(color="#374151", size=11),
+        titlefont=dict(color="#1C1C2E", size=12),
+    ),
+    yaxis=dict(
+        showgrid=True, gridcolor="#E8ECF0", linecolor="#CBD5E1",
+        tickfont=dict(color="#374151", size=11),
+        titlefont=dict(color="#1C1C2E", size=12),
+    ),
+    title=dict(font=dict(color="#1C1C2E", size=14, family="Inter, sans-serif")),
+    legend=dict(
+        bgcolor="rgba(255,255,255,0.95)", bordercolor="#CBD5E1",
+        borderwidth=1, orientation="h", yanchor="bottom", y=1.02,
+        xanchor="right", x=1,
+        font=dict(color="#374151", size=11),
+    ),
+    margin=dict(l=20, r=20, t=50, b=20),
 )
 
 def make_equity_curve(cum_port: pd.Series, cum_bench: pd.Series,
@@ -876,283 +873,771 @@ def _build_pdf_styles():
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(
         name="ReportTitle",
-        fontSize=26, fontName="Helvetica-Bold",
-        textColor=colors.HexColor(DARK),
-        alignment=TA_CENTER, spaceAfter=6,
+        fontSize=24, fontName="Helvetica-Bold",
+        textColor=colors.white,
+        alignment=TA_CENTER, spaceAfter=4,
     ))
     styles.add(ParagraphStyle(
         name="ReportSubtitle",
-        fontSize=12, fontName="Helvetica",
-        textColor=colors.HexColor("#64748B"),
-        alignment=TA_CENTER, spaceAfter=20,
+        fontSize=11, fontName="Helvetica",
+        textColor=colors.HexColor("#CBD5E1"),
+        alignment=TA_CENTER, spaceAfter=0,
     ))
     styles.add(ParagraphStyle(
         name="SectionHeader",
-        fontSize=14, fontName="Helvetica-Bold",
-        textColor=colors.HexColor(DARK),
-        spaceBefore=16, spaceAfter=8,
-        borderPad=6,
+        fontSize=13, fontName="Helvetica-Bold",
+        textColor=colors.white,
+        spaceBefore=0, spaceAfter=0,
+        leftIndent=8,
     ))
     styles.add(ParagraphStyle(
         name="SubHeader",
-        fontSize=11, fontName="Helvetica-Bold",
+        fontSize=10, fontName="Helvetica-Bold",
         textColor=colors.HexColor(PRIMARY),
         spaceBefore=10, spaceAfter=4,
     ))
     styles.add(ParagraphStyle(
         name="BodyText2",
-        fontSize=9, fontName="Helvetica",
+        fontSize=8.5, fontName="Helvetica",
         textColor=colors.HexColor("#374151"),
-        spaceAfter=3, leading=14,
+        spaceAfter=4, leading=13,
     ))
     styles.add(ParagraphStyle(
         name="FormulaText",
-        fontSize=9, fontName="Courier",
-        textColor=colors.HexColor(DARK),
+        fontSize=8, fontName="Courier",
+        textColor=colors.HexColor("#1E293B"),
         backColor=colors.HexColor("#F1F5F9"),
-        borderPad=6, spaceAfter=6,
+        borderPad=5, spaceAfter=5, leading=12,
+    ))
+    styles.add(ParagraphStyle(
+        name="Caption",
+        fontSize=7.5, fontName="Helvetica-Oblique",
+        textColor=colors.HexColor("#6B7280"),
+        alignment=TA_CENTER, spaceAfter=4,
     ))
     return styles
 
 def _rl_table_style(has_header: bool = True) -> TableStyle:
     style = [
-        ("BACKGROUND", (0, 0), (-1, 0 if has_header else -1),
-         colors.HexColor(DARK) if has_header else colors.white),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white if has_header else colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0),
+         colors.HexColor(DARK) if has_header else colors.HexColor("#F8FAFC")),
+        ("TEXTCOLOR", (0, 0), (-1, 0),
+         colors.white if has_header else colors.HexColor(DARK)),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1),
          [colors.white, colors.HexColor("#F8FAFC")]),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E2E8F0")),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#E2E8F0")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]
     return TableStyle(style)
 
-def _fig_to_image_bytes(fig) -> BytesIO:
-    """Convert a plotly figure to PNG bytes for PDF embedding."""
-    try:
-        img_bytes = fig.to_image(format="png", width=800, height=400, scale=2)
-        return BytesIO(img_bytes)
-    except Exception:
-        return None
+def _section_banner(title: str, subtitle: str = "") -> RLTable:
+    """Red banner for section headers."""
+    cell_content = [Paragraph(title, ParagraphStyle(
+        "BannerTitle", fontSize=12, fontName="Helvetica-Bold",
+        textColor=colors.white, spaceAfter=0,
+    ))]
+    if subtitle:
+        cell_content.append(Paragraph(subtitle, ParagraphStyle(
+            "BannerSub", fontSize=8, fontName="Helvetica",
+            textColor=colors.HexColor("#FECACA"), spaceAfter=0,
+        )))
+    t = RLTable([[cell_content]], colWidths=[17 * cm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(PRIMARY)),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("ROUNDEDCORNERS", [4, 4, 4, 4]),
+    ]))
+    return t
+
+# ── Matplotlib chart builders for PDF ──────────────────────
+
+MPL_COLORS = {
+    "primary": "#C8102E",
+    "accent": "#2E86AB",
+    "success": "#2ECC71",
+    "warning": "#F39C12",
+    "dark": "#1C1C2E",
+    "light_bg": "#F7F9FC",
+    "grid": "#E8ECF0",
+}
+
+def _mpl_base_style(ax, title: str = "", xlabel: str = "", ylabel: str = ""):
+    ax.set_facecolor(MPL_COLORS["light_bg"])
+    ax.grid(True, color=MPL_COLORS["grid"], linewidth=0.6, linestyle="-")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color(MPL_COLORS["grid"])
+    ax.spines["bottom"].set_color(MPL_COLORS["grid"])
+    ax.tick_params(colors=MPL_COLORS["dark"], labelsize=7)
+    if title:
+        ax.set_title(title, fontsize=9, fontweight="bold",
+                     color=MPL_COLORS["dark"], pad=6)
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=7.5, color=MPL_COLORS["dark"])
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=7.5, color=MPL_COLORS["dark"])
 
 def _mpl_fig_to_bytes(fig) -> BytesIO:
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
-                facecolor="white")
+    fig.savefig(buf, format="png", dpi=180, bbox_inches="tight",
+                facecolor="white", edgecolor="none")
     plt.close(fig)
     buf.seek(0)
     return buf
+
+def _pdf_chart_equity(cum_port: pd.Series, cum_bench: pd.Series,
+                      bench_label: str) -> BytesIO:
+    fig, ax = plt.subplots(figsize=(7.5, 3.2))
+    base = 100.0
+    p = cum_port / cum_port.iloc[0] * base
+    b = cum_bench / cum_bench.iloc[0] * base
+    ax.plot(p.index, p.values, color=MPL_COLORS["primary"], lw=1.8,
+            label="Portfolio", zorder=3)
+    ax.plot(b.index, b.values, color=MPL_COLORS["accent"], lw=1.4,
+            linestyle="--", label=bench_label, zorder=2)
+    ax.fill_between(p.index, p.values, b.values,
+                    where=p.values >= b.values,
+                    alpha=0.12, color=MPL_COLORS["success"], label="Outperformance")
+    ax.fill_between(p.index, p.values, b.values,
+                    where=p.values < b.values,
+                    alpha=0.12, color=MPL_COLORS["primary"])
+    _mpl_base_style(ax, "Portfolio vs Benchmark — Equity Curve (base 100)",
+                    "Date", "Index (base 100)")
+    ax.legend(fontsize=7, loc="upper left",
+              facecolor="white", edgecolor=MPL_COLORS["grid"])
+    fig.tight_layout()
+    return _mpl_fig_to_bytes(fig)
+
+def _pdf_chart_frontier(frontier_df: pd.DataFrame,
+                        gmv_point: tuple, tan_point: tuple,
+                        sel_point: tuple, rf: float) -> BytesIO:
+    fig, ax = plt.subplots(figsize=(7.5, 3.8))
+    if not frontier_df.empty:
+        ax.plot(frontier_df["Volatility"] * 100, frontier_df["Return"] * 100,
+                color=MPL_COLORS["primary"], lw=2.2, label="Efficient Frontier", zorder=3)
+    if gmv_point:
+        ax.scatter([gmv_point[0] * 100], [gmv_point[1] * 100],
+                   marker="D", s=80, color=MPL_COLORS["accent"],
+                   zorder=5, label="GMV Portfolio")
+        ax.annotate("GMV", (gmv_point[0] * 100, gmv_point[1] * 100),
+                    textcoords="offset points", xytext=(6, 4),
+                    fontsize=7, color=MPL_COLORS["accent"], fontweight="bold")
+    if tan_point:
+        ax.scatter([tan_point[0] * 100], [tan_point[1] * 100],
+                   marker="*", s=160, color=MPL_COLORS["success"],
+                   zorder=5, label="Tangency (Max Sharpe)")
+        ax.annotate("Tangency", (tan_point[0] * 100, tan_point[1] * 100),
+                    textcoords="offset points", xytext=(6, 4),
+                    fontsize=7, color=MPL_COLORS["success"], fontweight="bold")
+        # CML
+        vol_range = np.linspace(0, tan_point[0] * 1.6, 50)
+        cml = rf * 100 + (tan_point[1] - rf) / tan_point[0] * vol_range
+        ax.plot(vol_range * 100, cml, color=MPL_COLORS["warning"],
+                lw=1.4, linestyle="--", label="CML", zorder=2)
+    if sel_point:
+        ax.scatter([sel_point[0] * 100], [sel_point[1] * 100],
+                   marker="o", s=100, color=MPL_COLORS["primary"],
+                   edgecolors="white", linewidths=1.5, zorder=6,
+                   label="Selected Portfolio")
+        ax.annotate("Portfolio", (sel_point[0] * 100, sel_point[1] * 100),
+                    textcoords="offset points", xytext=(-50, 6),
+                    fontsize=7, color=MPL_COLORS["primary"], fontweight="bold")
+    _mpl_base_style(ax, "Mean-Variance Efficient Frontier",
+                    "Volatility (σ) %", "Expected Return (μ) %")
+    ax.legend(fontsize=7, facecolor="white", edgecolor=MPL_COLORS["grid"])
+    fig.tight_layout()
+    return _mpl_fig_to_bytes(fig)
+
+def _pdf_chart_weights(weights: pd.Series) -> BytesIO:
+    w = weights[weights > 0.001].sort_values(ascending=True)
+    fig, ax = plt.subplots(figsize=(7.5, max(2.5, len(w) * 0.32)))
+    bar_colors = [MPL_COLORS["primary"] if v > w.median() else MPL_COLORS["accent"]
+                  for v in w.values]
+    bars = ax.barh(range(len(w)), w.values * 100, color=bar_colors,
+                   edgecolor="white", linewidth=0.5)
+    ax.set_yticks(range(len(w)))
+    ax.set_yticklabels(w.index, fontsize=7.5)
+    for bar, val in zip(bars, w.values):
+        ax.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height() / 2,
+                f"{val:.1f}%", va="center", fontsize=7,
+                color=MPL_COLORS["dark"], fontweight="bold")
+    _mpl_base_style(ax, "Portfolio Weights Allocation", "Weight (%)", "")
+    ax.set_xlim(0, w.values.max() * 100 * 1.18)
+    fig.tight_layout()
+    return _mpl_fig_to_bytes(fig)
+
+def _pdf_chart_corr(corr: pd.DataFrame) -> BytesIO:
+    n = len(corr)
+    fig, ax = plt.subplots(figsize=(7.5, max(3.5, n * 0.5)))
+    import matplotlib.colors as mcolors
+    cmap = plt.cm.RdBu_r
+    im = ax.imshow(corr.values, cmap=cmap, vmin=-1, vmax=1, aspect="auto")
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(corr.columns, rotation=45, ha="right", fontsize=6.5)
+    ax.set_yticklabels(corr.index, fontsize=6.5)
+    for i in range(n):
+        for j in range(n):
+            val = corr.values[i, j]
+            text_col = "white" if abs(val) > 0.6 else MPL_COLORS["dark"]
+            ax.text(j, i, f"{val:.2f}", ha="center", va="center",
+                    fontsize=5.5, color=text_col, fontweight="bold")
+    plt.colorbar(im, ax=ax, shrink=0.8, label="Correlation")
+    ax.set_title("Asset Correlation Matrix", fontsize=9,
+                 fontweight="bold", color=MPL_COLORS["dark"], pad=6)
+    fig.tight_layout()
+    return _mpl_fig_to_bytes(fig)
+
+def _pdf_chart_drawdown(cum_port: pd.Series) -> BytesIO:
+    fig, ax = plt.subplots(figsize=(7.5, 2.2))
+    roll_max = cum_port.cummax()
+    dd = (cum_port / roll_max - 1) * 100
+    ax.fill_between(dd.index, dd.values, 0,
+                    color=MPL_COLORS["primary"], alpha=0.35)
+    ax.plot(dd.index, dd.values, color=MPL_COLORS["primary"], lw=1)
+    _mpl_base_style(ax, "Historical Drawdown", "Date", "Drawdown (%)")
+    ax.axhline(0, color=MPL_COLORS["dark"], lw=0.8)
+    mdd_val = dd.min()
+    mdd_date = dd.idxmin()
+    ax.annotate(f"Max DD: {mdd_val:.1f}%",
+                xy=(mdd_date, mdd_val),
+                xytext=(20, 10), textcoords="offset points",
+                fontsize=7, color=MPL_COLORS["primary"], fontweight="bold",
+                arrowprops=dict(arrowstyle="->", color=MPL_COLORS["primary"],
+                                lw=0.8))
+    fig.tight_layout()
+    return _mpl_fig_to_bytes(fig)
+
+def _pdf_chart_rolling_sharpe(port_ret: pd.Series, rf_annual: float) -> BytesIO:
+    fig, ax = plt.subplots(figsize=(7.5, 2.2))
+    rf_d = rf_annual / TRADING_DAYS
+    excess = port_ret - rf_d
+    roll_sr = (excess.rolling(126).mean() /
+               excess.rolling(126).std() * np.sqrt(TRADING_DAYS))
+    ax.plot(roll_sr.index, roll_sr.values,
+            color=MPL_COLORS["accent"], lw=1.4, label="Rolling Sharpe (126d)")
+    ax.axhline(0, color="#94A3B8", lw=0.8, linestyle="--")
+    ax.axhline(1, color=MPL_COLORS["success"], lw=0.8, linestyle=":",
+               label="Sharpe = 1.0")
+    ax.fill_between(roll_sr.index, roll_sr.values, 0,
+                    where=roll_sr.values >= 0,
+                    alpha=0.12, color=MPL_COLORS["success"])
+    ax.fill_between(roll_sr.index, roll_sr.values, 0,
+                    where=roll_sr.values < 0,
+                    alpha=0.12, color=MPL_COLORS["primary"])
+    _mpl_base_style(ax, "Rolling Sharpe Ratio (126-day window)",
+                    "Date", "Sharpe Ratio")
+    ax.legend(fontsize=7, facecolor="white", edgecolor=MPL_COLORS["grid"])
+    fig.tight_layout()
+    return _mpl_fig_to_bytes(fig)
+
+def _pdf_chart_ff_betas(ff_results: dict) -> BytesIO:
+    fig, axes = plt.subplots(1, 2, figsize=(7.5, 2.8))
+
+    # Left: Factor betas bar
+    ax = axes[0]
+    factors = ["β_MktRF", "β_SMB", "β_HML"]
+    labels = ["Market\n(MktRF)", "Size\n(SMB)", "Value\n(HML)"]
+    vals = [ff_results.get(f, 0) for f in factors]
+    bar_cols = [MPL_COLORS["accent"] if v >= 0 else MPL_COLORS["primary"]
+                for v in vals]
+    bars = ax.bar(labels, vals, color=bar_cols, edgecolor="white", width=0.5)
+    ax.axhline(0, color=MPL_COLORS["dark"], lw=0.8)
+    for bar, v in zip(bars, vals):
+        ypos = v + 0.02 if v >= 0 else v - 0.06
+        ax.text(bar.get_x() + bar.get_width() / 2, ypos,
+                f"{v:.3f}", ha="center", fontsize=8, fontweight="bold",
+                color=MPL_COLORS["dark"])
+    _mpl_base_style(ax, "Factor Loadings (β)", "", "Beta Coefficient")
+
+    # Right: R² and alpha summary
+    ax2 = axes[1]
+    ax2.axis("off")
+    alpha_ann = ff_results.get("Alpha (annualised)", 0)
+    r2 = ff_results.get("R²", 0)
+    adj_r2 = ff_results.get("Adj. R²", 0)
+    t_alpha = ff_results.get("t_alpha", 0)
+    p_alpha = ff_results.get("p_alpha", 1)
+    summary_text = (
+        f"Fama-French 3-Factor Results\n\n"
+        f"Alpha (ann.):   {alpha_ann:.2%}\n"
+        f"t-stat alpha:   {t_alpha:.3f}\n"
+        f"p-value alpha:  {p_alpha:.4f}\n"
+        f"R²:             {r2:.3f}\n"
+        f"Adj. R²:        {adj_r2:.3f}\n"
+        f"N obs:          {ff_results.get('N obs', '')}\n\n"
+        f"{'✓ Alpha significant (5%)' if p_alpha < 0.05 else '✗ Alpha not significant'}"
+    )
+    ax2.text(0.05, 0.95, summary_text, transform=ax2.transAxes,
+             fontsize=8, va="top", fontfamily="monospace",
+             color=MPL_COLORS["dark"],
+             bbox=dict(boxstyle="round,pad=0.5", facecolor=MPL_COLORS["light_bg"],
+                       edgecolor=MPL_COLORS["grid"]))
+
+    fig.tight_layout()
+    return _mpl_fig_to_bytes(fig)
+
+def _add_image_to_story(story: list, img_bytes: BytesIO,
+                        caption: str, width_cm: float = 17):
+    if img_bytes is None:
+        return
+    try:
+        img_bytes.seek(0)
+        story.append(RLImage(img_bytes, width=width_cm * cm,
+                              height=width_cm * 0.42 * cm))
+        story.append(Paragraph(caption, ParagraphStyle(
+            "cap", fontSize=7.5, fontName="Helvetica-Oblique",
+            textColor=colors.HexColor("#6B7280"),
+            alignment=TA_CENTER, spaceAfter=6,
+        )))
+        story.append(Spacer(1, 0.15 * cm))
+    except Exception:
+        pass
+
 
 def build_pdf_report(
     report_params: dict,
     weights: pd.Series,
     metrics_df: pd.DataFrame,
     method_name: str,
-    equity_fig=None,
-    frontier_fig=None,
-    weights_fig=None,
-    corr_fig=None,
-    dd_fig=None,
-    rolling_sr_fig=None,
+    # raw data for matplotlib charts (preferred over plotly for PDF)
+    cum_port: pd.Series = None,
+    cum_bench: pd.Series = None,
+    port_ret: pd.Series = None,
+    rets: pd.DataFrame = None,
+    frontier_df: pd.DataFrame = None,
+    gmv_point: tuple = None,
+    tan_point: tuple = None,
+    sel_point: tuple = None,
+    rf: float = 0.0,
+    bench_label: str = "Benchmark",
     ff_results: dict = None,
     show_calcs: bool = False,
     calc_steps: dict = None,
 ) -> bytes:
-    """Generate a professional PDF report."""
+    """Generate a professional, chart-rich PDF report."""
     buf = BytesIO()
+    PAGE_W = 17 * cm  # usable width on A4 with 2cm margins each side
+
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         leftMargin=2 * cm, rightMargin=2 * cm,
-        topMargin=2 * cm, bottomMargin=2 * cm,
+        topMargin=1.8 * cm, bottomMargin=1.8 * cm,
     )
     styles = _build_pdf_styles()
     story = []
 
-    # ── Cover page ─────────────────────────────────────────
-    story.append(Spacer(1, 1.5 * cm))
-    story.append(Paragraph("PORTFOLIO MANAGEMENT", styles["ReportTitle"]))
-    story.append(Paragraph("Advanced Portfolio Analysis Report", styles["ReportSubtitle"]))
-    story.append(HRFlowable(width="100%", thickness=2, color=_brand_color()))
-    story.append(Spacer(1, 0.4 * cm))
+    # ── COVER PAGE ──────────────────────────────────────────────
+    # Dark header block
+    cover_title = RLTable(
+        [[Paragraph("PORTFOLIO MANAGEMENT", ParagraphStyle(
+              "CT", fontSize=22, fontName="Helvetica-Bold",
+              textColor=colors.white, alignment=TA_CENTER, spaceAfter=2)),
+          ],
+         [Paragraph("Advanced Portfolio Analysis Report", ParagraphStyle(
+              "CS", fontSize=11, fontName="Helvetica",
+              textColor=colors.HexColor("#CBD5E1"), alignment=TA_CENTER, spaceAfter=0)),
+          ],
+         [Paragraph("ESSCA · Prof. Olga Tatarnikova · Portfolio Management Course",
+                     ParagraphStyle("CI", fontSize=9, fontName="Helvetica-Oblique",
+                                    textColor=colors.HexColor("#94A3B8"),
+                                    alignment=TA_CENTER, spaceAfter=0)),
+          ]
+         ],
+        colWidths=[PAGE_W]
+    )
+    cover_title.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(DARK)),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 16),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+    ]))
+    story.append(cover_title)
+    story.append(Spacer(1, 0.5 * cm))
 
+    # Cover info table
     info_data = [
         ["Field", "Value"],
         ["Optimization Method", method_name],
-        ["Period", f"{report_params.get('start', '')} → {report_params.get('end', '')}"],
+        ["Analysis Period", f"{report_params.get('start', '')}  →  {report_params.get('end', '')}"],
         ["Benchmark", report_params.get("benchmark", "SPY")],
-        ["Risk-Free Rate", f"{report_params.get('rf', 0):.2%}"],
+        ["Risk-Free Rate (Rf)", f"{report_params.get('rf', 0):.2%}"],
+        ["Equity Risk Premium", f"{report_params.get('ERP', 0.05):.2%}"],
         ["Number of Assets", str(report_params.get("n_assets", ""))],
+        ["Geographic Regions", str(report_params.get("Regions", ""))],
         ["Date Generated", str(date.today())],
-        ["ESSCA — Prof. Olga Tatarnikova", "Portfolio Management Course"],
     ]
-    t = RLTable(info_data, colWidths=[7 * cm, 10 * cm])
-    t.setStyle(_rl_table_style())
-    story.append(t)
+    t_cover = RLTable(info_data, colWidths=[6.5 * cm, 10.5 * cm])
+    t_cover.setStyle(_rl_table_style())
+    story.append(t_cover)
     story.append(PageBreak())
 
-    # ── Step 1: Planning ────────────────────────────────────
-    story.append(Paragraph("STEP 1 — PLANNING", styles["SectionHeader"]))
-    story.append(HRFlowable(width="100%", thickness=1, color=_brand_color()))
-    story.append(Spacer(1, 0.3 * cm))
-
-    story.append(Paragraph("Investment Objectives & Capital Market Expectations",
-                            styles["SubHeader"]))
-    story.append(Paragraph(
-        "This portfolio is constructed following a rigorous asset allocation framework aligned "
-        "with Modern Portfolio Theory (Markowitz, 1952). The investment universe spans global "
-        "equities selected across multiple geographic regions. The optimization methodology "
-        f"applied is <b>{method_name}</b>, targeting an efficient risk-return trade-off relative "
-        "to the benchmark.",
-        styles["BodyText2"]
+    # ── STEP 1: PLANNING ────────────────────────────────────────
+    story.append(_section_banner(
+        "STEP 1 — PLANNING",
+        "Investment Objectives · Benchmark · Capital Market Expectations"
     ))
     story.append(Spacer(1, 0.3 * cm))
 
-    params_data = [["Parameter", "Value"]] + [
-        [k, str(v)] for k, v in report_params.items()
-    ]
-    t2 = RLTable(params_data, colWidths=[8 * cm, 9 * cm])
-    t2.setStyle(_rl_table_style())
-    story.append(t2)
-    story.append(PageBreak())
-
-    # ── Step 2: Execution ───────────────────────────────────
-    story.append(Paragraph("STEP 2 — EXECUTION: PORTFOLIO CONSTRUCTION",
-                            styles["SectionHeader"]))
-    story.append(HRFlowable(width="100%", thickness=1, color=_brand_color()))
-    story.append(Spacer(1, 0.3 * cm))
-
-    story.append(Paragraph(f"Optimization Method: {method_name}", styles["SubHeader"]))
-
-    method_desc = {
-        "Markowitz MVO (Max Sharpe)": "Mean-Variance Optimization maximizes the Sharpe ratio by finding the tangency portfolio on the efficient frontier. Formula: max w'μ/√(w'Σw) subject to Σwᵢ=1, wᵢ≥0.",
-        "Markowitz MVO (Min Variance)": "Global Minimum Variance portfolio minimizes total portfolio variance. Formula: min w'Σw subject to Σwᵢ=1, wᵢ≥0.",
-        "Elton-Gruber (Tangency)": "Elton & Gruber (1977) simplified the Markowitz framework by computing z = Σ⁻¹(μ - Rf), then normalizing: w = z / Σzᵢ. This yields the tangency portfolio directly without quadratic programming.",
-        "Merton Two-Fund": "Merton's separation theorem: any efficient portfolio is a linear combination of the GMV and Tangency portfolios. w = α·w_tan + (1-α)·w_gmv, where α is calibrated to the target return.",
-        "Black-Litterman": "Black-Litterman blends CAPM equilibrium returns (Π) with investor views (Q, P) via Bayesian updating: μ_BL = [(τΣ)⁻¹ + P'Ω⁻¹P]⁻¹ [(τΣ)⁻¹Π + P'Ω⁻¹Q].",
-        "Equal Weight": "Naive diversification: wᵢ = 1/N for all assets. Benchmark strategy.",
-        "Momentum": "Smart-beta: overweights past winners (top quartile by 6-month return), underweights past losers.",
-        "Low Volatility": "Smart-beta: weights inversely proportional to historical volatility — wᵢ ∝ 1/σᵢ.",
-    }
-    desc = method_desc.get(method_name, "See application for methodology details.")
-    story.append(Paragraph(desc, styles["BodyText2"]))
-    story.append(Spacer(1, 0.3 * cm))
-
-    # Weights table
-    story.append(Paragraph("Final Portfolio Weights", styles["SubHeader"]))
-    w_show = weights[weights > 0.001].sort_values(ascending=False)
-    w_data = [["Ticker", "Weight (%)", "Rank"]]
-    for i, (t, v) in enumerate(w_show.items(), 1):
-        w_data.append([str(t), f"{v:.2%}", str(i)])
-    wt = RLTable(w_data, colWidths=[5 * cm, 5 * cm, 5 * cm])
-    wt.setStyle(_rl_table_style())
-    story.append(wt)
-
-    # Embed charts
-    def _add_fig(fig, caption: str, width_cm=16):
-        if fig is None:
-            return
-        try:
-            img_b = _fig_to_image_bytes(fig)
-            if img_b:
-                story.append(Spacer(1, 0.3 * cm))
-                story.append(RLImage(img_b, width=width_cm * cm,
-                                     height=width_cm * 0.5 * cm))
-                story.append(Paragraph(f"<i>{caption}</i>",
-                                        ParagraphStyle("cap", fontSize=8,
-                                                        textColor=colors.grey,
-                                                        alignment=TA_CENTER)))
-                story.append(Spacer(1, 0.2 * cm))
-        except Exception:
-            pass
-
-    story.append(Spacer(1, 0.4 * cm))
-    _add_fig(weights_fig, "Figure 1: Portfolio Weights Allocation")
-    story.append(PageBreak())
-
-    _add_fig(frontier_fig, "Figure 2: Mean-Variance Efficient Frontier with GMV, Tangency & CML")
-    _add_fig(corr_fig, "Figure 3: Asset Correlation Matrix")
-    story.append(PageBreak())
-
-    # Show intermediate calculations if requested
-    if show_calcs and calc_steps:
-        story.append(Paragraph("Intermediate Calculations (Professor Review)",
-                                styles["SubHeader"]))
-        story.append(Paragraph(
-            "The following shows the step-by-step calculations used in the optimization process.",
-            styles["BodyText2"]
-        ))
-        for step_name, step_val in calc_steps.items():
-            story.append(Paragraph(f"• {step_name}:", styles["BodyText2"]))
-            if isinstance(step_val, np.ndarray):
-                if step_val.ndim == 1:
-                    vals = ", ".join([f"{x:.4f}" for x in step_val[:10]])
-                    story.append(Paragraph(f"  [{vals}{'...' if len(step_val)>10 else ''}]",
-                                           styles["FormulaText"]))
-                else:
-                    story.append(Paragraph(
-                        f"  Matrix {step_val.shape} — see application for full display",
-                        styles["FormulaText"]
-                    ))
-            elif isinstance(step_val, float):
-                story.append(Paragraph(f"  {step_val:.6f}", styles["FormulaText"]))
-            else:
-                story.append(Paragraph(f"  {str(step_val)[:200]}", styles["FormulaText"]))
-        story.append(PageBreak())
-
-    # ── Step 3: Feedback ─────────────────────────────────────
-    story.append(Paragraph("STEP 3 — FEEDBACK: PERFORMANCE EVALUATION",
-                            styles["SectionHeader"]))
-    story.append(HRFlowable(width="100%", thickness=1, color=_brand_color()))
-    story.append(Spacer(1, 0.3 * cm))
-
-    story.append(Paragraph("Key Performance & Risk Metrics", styles["SubHeader"]))
+    story.append(Paragraph("Investment Framework", styles["SubHeader"]))
     story.append(Paragraph(
-        "Performance is evaluated using the full set of course metrics (S9 — Performance Evaluation). "
-        "All ratios are annualised unless stated otherwise.",
+        "This portfolio follows the <b>three-step asset allocation framework</b> (S2 — Asset Allocation). "
+        "The execution applies <b>Modern Portfolio Theory</b> (Markowitz, 1952): constructing a portfolio "
+        f"on the efficient frontier using <b>{method_name}</b>. "
+        "The objective is to maximise risk-adjusted return relative to the selected benchmark, "
+        "respecting the investor's risk tolerance and return objectives.",
         styles["BodyText2"]
     ))
     story.append(Spacer(1, 0.2 * cm))
 
-    if not metrics_df.empty:
-        m_data = [["Metric", "Value"]] + metrics_df.values.tolist()
-        mt = RLTable(m_data, colWidths=[10 * cm, 7 * cm])
-        mt.setStyle(_rl_table_style())
-        story.append(mt)
+    story.append(Paragraph("Capital Market Expectations (CME)", styles["SubHeader"]))
+    story.append(Paragraph(
+        "Expected returns are estimated from historical geometric returns annualised over the analysis period. "
+        "The covariance matrix is computed from daily returns and annualised (×252 trading days). "
+        f"Risk-free rate: {report_params.get('rf', 0):.2%} · "
+        f"Equity Risk Premium: {report_params.get('ERP', 0.05):.2%}.",
+        styles["BodyText2"]
+    ))
+    story.append(Spacer(1, 0.25 * cm))
 
-    story.append(Spacer(1, 0.4 * cm))
-    _add_fig(equity_fig, "Figure 4: Portfolio vs Benchmark Equity Curve (base 100)")
-    _add_fig(dd_fig, "Figure 5: Historical Drawdown")
-    _add_fig(rolling_sr_fig, "Figure 6: Rolling Sharpe Ratio (126-day window)")
+    params_data = [["Parameter", "Value"]] + [
+        [k, str(v)] for k, v in report_params.items()
+        if k not in ["start", "end"]
+    ]
+    t_params = RLTable(params_data, colWidths=[7 * cm, 10 * cm])
+    t_params.setStyle(_rl_table_style())
+    story.append(t_params)
+    story.append(PageBreak())
 
-    # Fama-French results
-    if ff_results:
-        story.append(PageBreak())
-        story.append(Paragraph("Fama-French 3-Factor Regression", styles["SubHeader"]))
+    # ── STEP 2: EXECUTION ───────────────────────────────────────
+    story.append(_section_banner(
+        "STEP 2 — EXECUTION: PORTFOLIO CONSTRUCTION",
+        "Optimization Methodology · Portfolio Weights · Efficient Frontier · Correlation"
+    ))
+    story.append(Spacer(1, 0.3 * cm))
+
+    story.append(Paragraph(f"Optimization Method: {method_name}", styles["SubHeader"]))
+
+    method_details = {
+        "Markowitz MVO (Max Sharpe)": (
+            "Mean-Variance Optimization (Markowitz, 1952) identifies the tangency portfolio — "
+            "the point on the efficient frontier with the highest Sharpe ratio.",
+            "Objective:  max  (w'μ - Rf) / √(w'Σw)\n"
+            "Subject to: Σwᵢ = 1,  wᵢ ≥ 0  (long-only)\n"
+            "Solution:   w* = Σ⁻¹(μ - Rf) / [1'·Σ⁻¹(μ - Rf)]  (closed-form)",
+        ),
+        "Markowitz MVO (Min Variance)": (
+            "The Global Minimum Variance (GMV) portfolio minimises total variance — "
+            "the leftmost point of the efficient frontier, optimal for maximally risk-averse investors.",
+            "Objective:  min  w'Σw\n"
+            "Subject to: Σwᵢ = 1,  wᵢ ≥ 0\n"
+            "Solution:   w_GMV = Σ⁻¹·1 / (1'·Σ⁻¹·1)  (closed-form)",
+        ),
+        "Elton-Gruber (Tangency)": (
+            "Elton & Gruber (1977) provided a closed-form simplification of Markowitz, "
+            "computing the tangency portfolio directly from the inverse covariance matrix.",
+            "Step 1:  Compute excess returns  e = μ - Rf\n"
+            "Step 2:  z = Σ⁻¹ · e  (z-vector)\n"
+            "Step 3:  w* = z / Σzᵢ  (normalise to sum to 1)",
+        ),
+        "Merton Two-Fund": (
+            "Merton's Separation Theorem (1969): any efficient portfolio is a linear combination "
+            "of two funds — the GMV and the Tangency portfolio.",
+            "w*(target) = α · w_tan + (1 - α) · w_gmv\n"
+            "where  α = (μ_target - μ_gmv) / (μ_tan - μ_gmv)\n"
+            "Interpretation: α > 1 → leveraged, α < 0 → short market",
+        ),
+        "Black-Litterman": (
+            "Black & Litterman (1992) blend CAPM equilibrium returns (Π) with investor views "
+            "via Bayesian updating, producing a more stable and diversified allocation.",
+            "Prior:   Π = δ·Σ·w_mkt  (CAPM-implied equilibrium returns)\n"
+            "Posterior: μ_BL = [(τΣ)⁻¹ + P'Ω⁻¹P]⁻¹ · [(τΣ)⁻¹Π + P'Ω⁻¹Q]\n"
+            "Views: absolute (asset i returns r%) or relative (i outperforms j by r%)",
+        ),
+        "Equal Weight": (
+            "Naïve 1/N diversification assigns equal weight to all assets. "
+            "Despite its simplicity, it is competitive with MVO out-of-sample (DeMiguel et al., 2009).",
+            "wᵢ = 1/N  for all i = 1, ..., N",
+        ),
+        "Momentum": (
+            "Smart-beta momentum strategy (Carhart, 1997): overweight past winners, "
+            "underweight past losers. Exploits the momentum factor (UMD).",
+            "wᵢ ∝ rank(Ret₋₁₂₆ days)  · tilt multiplier\n"
+            "Top 25%: weight × 2  |  Bottom 25%: weight × 0.5",
+        ),
+        "Low Volatility": (
+            "Smart-beta low-volatility strategy: weights inversely proportional to historical σᵢ. "
+            "Exploits the low-vol anomaly (Baker, Bradley & Wurgler, 2011).",
+            "wᵢ ∝ 1/σᵢ  (inverse volatility weighting)\n"
+            "σᵢ = historical daily std × √252  (annualised)",
+        ),
+    }
+
+    desc, formula = method_details.get(method_name, ("See application.", ""))
+    story.append(Paragraph(desc, styles["BodyText2"]))
+    if formula:
+        story.append(Paragraph(formula, styles["FormulaText"]))
+    story.append(Spacer(1, 0.2 * cm))
+
+    # Weights table
+    story.append(Paragraph("Final Portfolio Weights", styles["SubHeader"]))
+    w_show = weights[weights > 0.001].sort_values(ascending=False)
+    w_data = [["Rank", "Ticker", "Weight (%)", "Contribution"]]
+    for i, (ticker, v) in enumerate(w_show.items(), 1):
+        bar = "█" * int(v * 40)
+        w_data.append([str(i), str(ticker), f"{v:.2%}", bar])
+    wt = RLTable(w_data, colWidths=[1.5 * cm, 4 * cm, 4 * cm, 7.5 * cm])
+    wt.setStyle(_rl_table_style())
+    story.append(wt)
+    story.append(Spacer(1, 0.3 * cm))
+
+    # Weights chart
+    if cum_port is not None:
+        w_img = _pdf_chart_weights(weights)
+        _add_image_to_story(story, w_img, "Figure 1: Portfolio Weights Allocation")
+
+    story.append(PageBreak())
+
+    # Efficient Frontier chart
+    if frontier_df is not None and not frontier_df.empty:
+        story.append(Paragraph("Efficient Frontier & Capital Market Line", styles["SubHeader"]))
         story.append(Paragraph(
-            "The portfolio's returns are regressed on the three Fama-French factors: "
-            "MktRF (market excess return), SMB (Small minus Big), HML (High minus Low B/M). "
-            "This decomposes alpha from systematic factor exposures.",
+            "The efficient frontier (Markowitz, 1952) plots all mean-variance optimal portfolios. "
+            "The GMV portfolio (◆) is the minimum-risk portfolio. "
+            "The Tangency portfolio (★) maximises the Sharpe ratio and lies at the tangent point of the CML. "
+            "The CML (dashed) connects the risk-free rate to the tangency portfolio — "
+            "all investors should combine the tangency portfolio with the risk-free asset.",
             styles["BodyText2"]
         ))
-        ff_data = [["Parameter", "Value"]] + [
-            [k, f"{v:.4f}" if isinstance(v, float) else str(v)]
-            for k, v in ff_results.items()
+        frontier_img = _pdf_chart_frontier(frontier_df, gmv_point, tan_point, sel_point, rf)
+        _add_image_to_story(story, frontier_img,
+                             "Figure 2: Mean-Variance Efficient Frontier with GMV, Tangency Portfolio & CML")
+
+    # Correlation matrix
+    if rets is not None:
+        story.append(Paragraph("Asset Correlation Matrix", styles["SubHeader"]))
+        story.append(Paragraph(
+            "Correlation measures co-movement between assets. Lower correlations → higher diversification benefit. "
+            "Values close to +1 indicate assets move together; close to −1 indicates inverse movement.",
+            styles["BodyText2"]
+        ))
+        corr_img = _pdf_chart_corr(rets.corr())
+        _add_image_to_story(story, corr_img, "Figure 3: Asset Correlation Matrix")
+
+    story.append(PageBreak())
+
+    # Intermediate calculations
+    if show_calcs and calc_steps:
+        story.append(Paragraph("Intermediate Calculations (Professor Review)",
+                                styles["SubHeader"]))
+        story.append(Paragraph(
+            f"Detailed step-by-step derivation for {method_name}:",
+            styles["BodyText2"]
+        ))
+        for step_name, step_val in calc_steps.items():
+            story.append(Paragraph(f"<b>{step_name}:</b>", styles["BodyText2"]))
+            if isinstance(step_val, np.ndarray) and step_val.ndim == 1:
+                tickers_short = [str(x) for x in range(len(step_val))]
+                rows = [["Asset"] + [f"w{i}" for i in range(min(len(step_val), 10))]]
+                rows.append(["Value"] + [f"{x:.4f}" for x in step_val[:10]])
+                if len(step_val) > 10:
+                    rows[0].append("...")
+                    rows[1].append("...")
+                small_t = RLTable(rows)
+                small_t.setStyle(_rl_table_style())
+                story.append(small_t)
+            elif isinstance(step_val, float):
+                story.append(Paragraph(f"  = {step_val:.6f}", styles["FormulaText"]))
+            elif isinstance(step_val, np.ndarray) and step_val.ndim == 2:
+                story.append(Paragraph(
+                    f"  [{step_val.shape[0]} × {step_val.shape[1]} matrix — see app for full display]",
+                    styles["FormulaText"]
+                ))
+            else:
+                story.append(Paragraph(f"  {str(step_val)[:300]}", styles["FormulaText"]))
+            story.append(Spacer(1, 0.1 * cm))
+        story.append(PageBreak())
+
+    # ── STEP 3: FEEDBACK ────────────────────────────────────────
+    story.append(_section_banner(
+        "STEP 3 — FEEDBACK: PERFORMANCE EVALUATION",
+        "Risk-Adjusted Metrics · Benchmark Comparison · Factor Analysis (S9)"
+    ))
+    story.append(Spacer(1, 0.3 * cm))
+
+    story.append(Paragraph("Performance & Risk Metrics (S9 — Performance Evaluation)",
+                            styles["SubHeader"]))
+    story.append(Paragraph(
+        "All ratios are annualised. Benchmark: " + report_params.get("benchmark", "SPY") + ".",
+        styles["BodyText2"]
+    ))
+    story.append(Spacer(1, 0.15 * cm))
+
+    # Split metrics into two columns
+    if not metrics_df.empty:
+        half = len(metrics_df) // 2 + len(metrics_df) % 2
+        left_m = metrics_df.iloc[:half]
+        right_m = metrics_df.iloc[half:]
+        m_left = [["Metric", "Value"]] + left_m.values.tolist()
+        m_right = [["Metric", "Value"]] + right_m.values.tolist()
+        # Pad if uneven
+        while len(m_right) < len(m_left):
+            m_right.append(["", ""])
+
+        combined = [[RLTable(m_left, colWidths=[5 * cm, 3 * cm]),
+                     Spacer(0.4 * cm, 0),
+                     RLTable(m_right, colWidths=[5 * cm, 3 * cm])]]
+        t_metrics = RLTable(combined, colWidths=[8.2 * cm, 0.6 * cm, 8.2 * cm])
+        t_metrics_left = RLTable(m_left, colWidths=[5.5 * cm, 3 * cm])
+        t_metrics_left.setStyle(_rl_table_style())
+        t_metrics_right = RLTable(m_right, colWidths=[5.5 * cm, 3 * cm])
+        t_metrics_right.setStyle(_rl_table_style())
+        row = [[t_metrics_left, t_metrics_right]]
+        t_side_by_side = RLTable(row, colWidths=[8.4 * cm, 8.6 * cm],
+                                  hAlign="LEFT", spaceAfter=0.2 * cm)
+        t_side_by_side.setStyle(TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.append(t_side_by_side)
+
+    # Metric formulas reference
+    story.append(Spacer(1, 0.1 * cm))
+    story.append(Paragraph(
+        "Sharpe = (Rp-Rf)/σp  ·  Sortino = (Rp-Rf)/σ_down  ·  Treynor = (Rp-Rf)/β  ·  "
+        "IR = (Rp-Rb)/TE  ·  Jensen's α = Rp - [Rf + β(Rm-Rf)]  ·  Calmar = CAGR/|MaxDD|",
+        styles["FormulaText"]
+    ))
+    story.append(Spacer(1, 0.25 * cm))
+
+    # Equity curve
+    if cum_port is not None and cum_bench is not None:
+        eq_img = _pdf_chart_equity(cum_port, cum_bench, bench_label)
+        _add_image_to_story(story, eq_img,
+                             "Figure 4: Portfolio vs Benchmark Equity Curve (base 100)")
+
+    # Drawdown + Rolling Sharpe side by side
+    if port_ret is not None and cum_port is not None:
+        dd_img = _pdf_chart_drawdown(cum_port)
+        rs_img = _pdf_chart_rolling_sharpe(port_ret, rf)
+        story.append(Spacer(1, 0.1 * cm))
+        # Place side by side
+        dd_img.seek(0)
+        rs_img.seek(0)
+        try:
+            row2 = [[RLImage(dd_img, width=8.2 * cm, height=3.4 * cm),
+                     RLImage(rs_img, width=8.2 * cm, height=3.4 * cm)]]
+            t_two = RLTable(row2, colWidths=[8.4 * cm, 8.6 * cm])
+            t_two.setStyle(TableStyle([
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]))
+            story.append(t_two)
+            story.append(Paragraph(
+                "Figure 5: Drawdown History (left)  ·  Figure 6: Rolling Sharpe Ratio (right)",
+                styles["Caption"]
+            ))
+        except Exception:
+            pass
+
+    story.append(PageBreak())
+
+    # CAPM & Fama-French
+    story.append(Paragraph("CAPM Analysis", styles["SubHeader"]))
+    story.append(Paragraph(
+        "The Capital Asset Pricing Model (Sharpe, 1964) describes the relationship between "
+        "systematic risk (β) and expected return: <b>E[Ri] − Rf = βᵢ · (E[Rm] − Rf)</b>. "
+        "Jensen's Alpha (α) measures the abnormal return above/below the CAPM-implied return. "
+        "A positive α indicates portfolio outperformance after adjusting for market risk.",
+        styles["BodyText2"]
+    ))
+    story.append(Spacer(1, 0.15 * cm))
+
+    # Extract CAPM metrics from metrics_df
+    m_dict = {}
+    if not metrics_df.empty:
+        m_dict = dict(zip(metrics_df["Metric"], metrics_df["Value"]))
+    capm_data = [
+        ["CAPM Metric", "Value", "Interpretation"],
+        ["Beta (β)", m_dict.get("Beta (vs Benchmark)", "—"),
+         "< 1: Defensive  |  > 1: Aggressive"],
+        ["Jensen's Alpha (ann.)", m_dict.get("Jensen's Alpha (ann.)", "—"),
+         "> 0: Outperforms CAPM prediction"],
+        ["Tracking Error", m_dict.get("Tracking Error (ann.)", "—"),
+         "Volatility of active returns vs benchmark"],
+        ["Information Ratio", m_dict.get("Information Ratio", "—"),
+         "Alpha per unit of active risk (> 0.5 = good)"],
+    ]
+    t_capm = RLTable(capm_data, colWidths=[5 * cm, 3 * cm, 9 * cm])
+    t_capm.setStyle(_rl_table_style())
+    story.append(t_capm)
+    story.append(Spacer(1, 0.3 * cm))
+
+    # Fama-French
+    story.append(Paragraph("Fama-French 3-Factor Regression", styles["SubHeader"]))
+    story.append(Paragraph(
+        "The Fama-French model (1993) extends CAPM with two additional factors: "
+        "<b>SMB</b> (Small Minus Big — size premium) and <b>HML</b> (High Minus Low — value premium). "
+        "The regression decomposes portfolio returns into factor exposures and a pure alpha:",
+        styles["BodyText2"]
+    ))
+    story.append(Paragraph(
+        "Rp - Rf  =  α  +  β_MKT·(Rm-Rf)  +  β_SMB·SMB  +  β_HML·HML  +  ε",
+        styles["FormulaText"]
+    ))
+
+    if ff_results:
+        ff_img = _pdf_chart_ff_betas(ff_results)
+        _add_image_to_story(story, ff_img,
+                             "Figure 7: Fama-French Factor Loadings & Regression Summary")
+
+        ff_table_data = [
+            ["Parameter", "Value", "Statistical Significance"],
+            ["Alpha (daily)", f"{ff_results.get('Alpha (daily)', 0):.6f}",
+             f"t = {ff_results.get('t_alpha', 0):.3f}  |  p = {ff_results.get('p_alpha', 1):.4f}"],
+            ["Alpha (annualised)", f"{ff_results.get('Alpha (annualised)', 0):.2%}",
+             "★ Significant at 5%" if ff_results.get("p_alpha", 1) < 0.05 else "Not significant at 5%"],
+            ["β Market (MktRF)", f"{ff_results.get('β_MktRF', 0):.4f}",
+             f"t = {ff_results.get('t_MktRF', 0):.3f}"],
+            ["β Size (SMB)", f"{ff_results.get('β_SMB', 0):.4f}",
+             f"t = {ff_results.get('t_SMB', 0):.3f}"],
+            ["β Value (HML)", f"{ff_results.get('β_HML', 0):.4f}",
+             f"t = {ff_results.get('t_HML', 0):.3f}"],
+            ["R²", f"{ff_results.get('R²', 0):.4f}", "Fraction of return variance explained"],
+            ["Adj. R²", f"{ff_results.get('Adj. R²', 0):.4f}", "R² adjusted for 3 regressors"],
+            ["N observations", str(ff_results.get("N obs", "")), "Trading days in sample"],
         ]
-        fft = RLTable(ff_data, colWidths=[8 * cm, 9 * cm])
-        fft.setStyle(_rl_table_style())
-        story.append(fft)
+        t_ff = RLTable(ff_table_data, colWidths=[4.5 * cm, 3.5 * cm, 9 * cm])
+        t_ff.setStyle(_rl_table_style())
+        story.append(t_ff)
+    else:
+        story.append(Paragraph(
+            "Fama-French data unavailable — please check internet connection or date range.",
+            styles["BodyText2"]
+        ))
 
     # Footer
-    story.append(Spacer(1, 1 * cm))
-    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#E2E8F0")))
+    story.append(Spacer(1, 0.8 * cm))
+    story.append(HRFlowable(width="100%", thickness=0.5,
+                             color=colors.HexColor("#E2E8F0")))
+    story.append(Spacer(1, 0.15 * cm))
     story.append(Paragraph(
-        f"<i>Generated by Portfolio Management Pro · ESSCA · Prof. Olga Tatarnikova · {date.today()}</i>",
-        ParagraphStyle("footer", fontSize=7, textColor=colors.grey, alignment=TA_CENTER)
+        f"Generated by Portfolio Management Pro  ·  ESSCA  ·  Prof. Olga Tatarnikova  ·  {date.today()}",
+        ParagraphStyle("footer", fontSize=7, fontName="Helvetica-Oblique",
+                       textColor=colors.HexColor("#9CA3AF"), alignment=TA_CENTER)
     ))
 
     doc.build(story)
@@ -1199,11 +1684,11 @@ with st.sidebar:
 
     # Show available tickers count
     candidate_tickers = get_tickers_for_regions(region_choices)
-    st.caption(f"📦 {len(candidate_tickers)} tickers available in selected regions")
+    st.caption(f"📦 {len(candidate_tickers)} tickers in universe · app tests all, keeps most liquid")
 
     # Let user further refine
-    max_assets = st.slider("Max assets to include", 5, 30, 15,
-                           help="App selects the most liquid from available tickers")
+    max_assets = st.slider("Assets in portfolio", 5, 50, 15,
+                           help="Fetches ALL region tickers, drops illiquid ones, keeps top N by data completeness")
 
     st.markdown("---")
     # ── Period ──────────────────────────────────────────────
@@ -1322,22 +1807,45 @@ if run:
         st.error("Please select at least one region.")
         st.stop()
 
-    with st.spinner("⏳ Fetching market data…"):
+    with st.spinner("⏳ Fetching market data for all selected regions…"):
         all_tickers = get_tickers_for_regions(region_choices)
-        # Limit to manageable set
-        tickers_to_try = all_tickers[:min(len(all_tickers), max_assets * 3)]
-        prices = fetch_prices(
-            tuple(tickers_to_try),
-            str(start_date), str(end_date)
-        )
-        if prices.empty:
+
+        # Fetch ALL tickers in batches of 60 to avoid yfinance timeouts
+        BATCH = 60
+        price_chunks = []
+        for i in range(0, len(all_tickers), BATCH):
+            batch = all_tickers[i : i + BATCH]
+            chunk = fetch_prices(tuple(batch), str(start_date), str(end_date))
+            if not chunk.empty:
+                price_chunks.append(chunk)
+
+        if not price_chunks:
             st.error("No data returned. Try different tickers or date range.")
             st.stop()
 
-        # Keep most liquid (fewest NaN)
-        prices = prices.dropna(axis=1, thresh=int(0.85 * len(prices)))
-        prices = prices.iloc[:, :max_assets]  # cap at max_assets
+        # Merge all chunks on the date index
+        prices_all = pd.concat(price_chunks, axis=1)
+        prices_all = prices_all.loc[:, ~prices_all.columns.duplicated()]
+
+        # Rank by data completeness — keep >= 70% coverage
+        completeness = prices_all.notna().sum().sort_values(ascending=False)
+        min_rows = int(0.70 * len(prices_all))
+        good_tickers = completeness[completeness >= min_rows].index.tolist()
+        prices_all = prices_all[good_tickers].ffill().dropna()
+
+        if prices_all.empty or len(prices_all.columns) == 0:
+            st.error("No tickers had sufficient data. Broaden regions or extend date range.")
+            st.stop()
+
+        # Keep the top max_assets by completeness
+        top_tickers = completeness[good_tickers].head(max_assets).index.tolist()
+        prices = prices_all[top_tickers]
         tickers = prices.columns.tolist()
+
+        st.caption(
+            f"✅ {len(good_tickers)} tickers had sufficient data · "
+            f"keeping top {len(tickers)} by data completeness"
+        )
 
         # Benchmark
         bench_prices = fetch_prices(
@@ -1917,9 +2425,10 @@ with tab4:
             st.markdown("""
             <div class="formula-box">
             FF3:  Rₚ - Rf = α + β_MKT·(Rm - Rf) + β_SMB·SMB + β_HML·HML + ε
-            
-            MktRF = Market excess return  |  SMB = Small minus Big (size factor)
-            HML   = High minus Low B/M   (value factor)  |  α = abnormal return
+
+            Factor proxies (ETF-based, fully self-contained):
+            Mkt-RF = SPY − SHY  |  SMB = IWM − IWB (small − large cap)
+            HML    = IVE − IVW  (value − growth)    |  RF = SHY daily return
             </div>
             """, unsafe_allow_html=True)
 
@@ -2033,12 +2542,16 @@ with tab5:
                     weights=R["weights"],
                     metrics_df=R["metrics_df"],
                     method_name=R["method"],
-                    equity_fig=R["equity_fig"],
-                    frontier_fig=R["frontier_fig"],
-                    weights_fig=R["weights_fig"],
-                    corr_fig=R["corr_fig"],
-                    dd_fig=R["dd_fig"],
-                    rolling_sr_fig=R["rolling_sr_fig"],
+                    cum_port=R["cum_port"],
+                    cum_bench=R["cum_bench"],
+                    port_ret=R["port_ret"],
+                    rets=R["rets"],
+                    frontier_df=R["frontier_df"],
+                    gmv_point=R["gmv_point"],
+                    tan_point=R["tan_point"],
+                    sel_point=R["sel_point"],
+                    rf=rf_rate,
+                    bench_label=bench_label,
                     ff_results=R.get("ff_results"),
                     show_calcs=include_calcs,
                     calc_steps=R.get("calc_steps"),
