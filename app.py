@@ -1,6 +1,6 @@
 # ============================================================
 # Portfolio Management Pro — ESSCA Project
-# Prof. Benoit Seguret — Portfolio Management
+# Prof. Olga Tatarnikova — Portfolio Management
 # ============================================================
 # Covers: Asset Allocation, MVO (Markowitz), Elton-Gruber,
 # Merton Two-Fund, Black-Litterman, CAPM, Fama-French 3F,
@@ -682,21 +682,12 @@ def fama_french_regression(port_ret: pd.Series, ff_data: pd.DataFrame) -> dict:
 # PLOTLY CHART HELPERS
 # ============================================================
 
-PLOTLY_TEMPLATE = dict(
+# Base layout dict — no xaxis/yaxis keys to avoid conflicts with xaxis_title etc.
+PLOTLY_LAYOUT = dict(
     plot_bgcolor="#FFFFFF",
     paper_bgcolor="#FFFFFF",
     font=dict(family="Inter, sans-serif", color="#1C1C2E", size=12),
     colorway=[PRIMARY, ACCENT, SUCCESS, WARNING, "#9B59B6", "#1ABC9C", "#E67E22"],
-    xaxis=dict(
-        showgrid=True, gridcolor="#E8ECF0", linecolor="#CBD5E1",
-        tickfont=dict(color="#374151", size=11),
-        titlefont=dict(color="#1C1C2E", size=12),
-    ),
-    yaxis=dict(
-        showgrid=True, gridcolor="#E8ECF0", linecolor="#CBD5E1",
-        tickfont=dict(color="#374151", size=11),
-        titlefont=dict(color="#1C1C2E", size=12),
-    ),
     title=dict(font=dict(color="#1C1C2E", size=14, family="Inter, sans-serif")),
     legend=dict(
         bgcolor="rgba(255,255,255,0.95)", bordercolor="#CBD5E1",
@@ -706,6 +697,25 @@ PLOTLY_TEMPLATE = dict(
     ),
     margin=dict(l=20, r=20, t=50, b=20),
 )
+
+# Axis style applied separately via update_xaxes / update_yaxes
+AXIS_STYLE = dict(
+    showgrid=True, gridcolor="#E8ECF0", linecolor="#CBD5E1",
+    tickfont=dict(color="#374151", size=11),
+    title_font=dict(color="#1C1C2E", size=12),
+    zeroline=False,
+)
+
+def _apply_style(fig: go.Figure, title: str = "", xlabel: str = "",
+                 ylabel: str = "", height: int = 420) -> go.Figure:
+    """Apply consistent visual style to any Plotly figure."""
+    fig.update_layout(title=title, height=height, **PLOTLY_LAYOUT)
+    fig.update_xaxes(title_text=xlabel, **AXIS_STYLE)
+    fig.update_yaxes(title_text=ylabel, **AXIS_STYLE)
+    return fig
+
+# Keep backward-compat alias
+PLOTLY_TEMPLATE = PLOTLY_LAYOUT
 
 def make_equity_curve(cum_port: pd.Series, cum_bench: pd.Series,
                       port_label: str = "Portfolio",
@@ -719,11 +729,8 @@ def make_equity_curve(cum_port: pd.Series, cum_bench: pd.Series,
                              name=port_label, line=dict(color=PRIMARY, width=2.5)))
     fig.add_trace(go.Scatter(x=b.index, y=b.values, mode="lines",
                              name=bench_label, line=dict(color=ACCENT, width=2, dash="dot")))
-    fig.update_layout(
-        title="📈 Portfolio vs Benchmark — Equity Curve (base 100)",
-        height=420, xaxis_title="Date", yaxis_title="Index (base 100)",
-        **PLOTLY_TEMPLATE
-    )
+    _apply_style(fig, "📈 Portfolio vs Benchmark — Equity Curve (base 100)",
+                 "Date", "Index (base 100)", 420)
     return fig
 
 def make_frontier_chart(frontier: pd.DataFrame, gmv_point: tuple,
@@ -778,11 +785,8 @@ def make_frontier_chart(frontier: pd.DataFrame, gmv_point: tuple,
                         line=dict(color="white", width=2))
         ))
 
-    fig.update_layout(
-        title="📉 Mean-Variance Efficient Frontier",
-        xaxis_title="Volatility (σ) %", yaxis_title="Expected Return (μ) %",
-        height=480, **PLOTLY_TEMPLATE
-    )
+    _apply_style(fig, "📉 Mean-Variance Efficient Frontier",
+                 "Volatility (σ) %", "Expected Return (μ) %", 480)
     return fig
 
 def make_weights_chart(weights: pd.Series, title: str = "Portfolio Weights") -> go.Figure:
@@ -798,10 +802,7 @@ def make_weights_chart(weights: pd.Series, title: str = "Portfolio Weights") -> 
         text=[f"{v:.1f}%" for v in w.values * 100],
         textposition="outside",
     ))
-    fig.update_layout(
-        title=title, height=max(350, len(w) * 30 + 100),
-        xaxis_title="Weight (%)", **PLOTLY_TEMPLATE
-    )
+    _apply_style(fig, title, "Weight (%)", "", max(350, len(w) * 30 + 100))
     return fig
 
 def make_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
@@ -814,11 +815,7 @@ def make_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
         textfont=dict(size=9),
         colorbar=dict(title="ρ"),
     ))
-    fig.update_layout(
-        title="🔗 Correlation Matrix",
-        height=max(400, len(labels) * 35 + 120),
-        **PLOTLY_TEMPLATE
-    )
+    _apply_style(fig, "🔗 Correlation Matrix", "", "", max(400, len(labels) * 35 + 120))
     return fig
 
 def make_drawdown_chart(cum_series: pd.Series) -> go.Figure:
@@ -832,11 +829,7 @@ def make_drawdown_chart(cum_series: pd.Series) -> go.Figure:
         line=dict(color=PRIMARY, width=1.5),
         fillcolor=f"rgba(200,16,46,0.15)"
     ))
-    fig.update_layout(
-        title="📉 Drawdown History",
-        height=280, xaxis_title="Date", yaxis_title="Drawdown (%)",
-        **PLOTLY_TEMPLATE
-    )
+    _apply_style(fig, "📉 Drawdown History", "Date", "Drawdown (%)", 280)
     return fig
 
 def make_rolling_sharpe(port_ret: pd.Series, rf_annual: float,
@@ -854,11 +847,8 @@ def make_rolling_sharpe(port_ret: pd.Series, rf_annual: float,
     fig.add_hline(y=0, line_dash="dash", line_color="#94A3B8")
     fig.add_hline(y=1, line_dash="dot", line_color=SUCCESS,
                   annotation_text="Sharpe = 1")
-    fig.update_layout(
-        title=f"📊 Rolling Sharpe Ratio ({window} trading days)",
-        height=280, xaxis_title="Date", yaxis_title="Sharpe Ratio",
-        **PLOTLY_TEMPLATE
-    )
+    _apply_style(fig, f"📊 Rolling Sharpe Ratio ({window} trading days)",
+                 "Date", "Sharpe Ratio", 280)
     return fig
 
 
@@ -1248,7 +1238,7 @@ def build_pdf_report(
               "CS", fontSize=11, fontName="Helvetica",
               textColor=colors.HexColor("#CBD5E1"), alignment=TA_CENTER, spaceAfter=0)),
           ],
-         [Paragraph("ESSCA · Prof. Benoit Seguret · Portfolio Management Course",
+         [Paragraph("ESSCA · Prof. Olga Tatarnikova · Portfolio Management Course",
                      ParagraphStyle("CI", fontSize=9, fontName="Helvetica-Oblique",
                                     textColor=colors.HexColor("#94A3B8"),
                                     alignment=TA_CENTER, spaceAfter=0)),
@@ -1635,7 +1625,7 @@ def build_pdf_report(
                              color=colors.HexColor("#E2E8F0")))
     story.append(Spacer(1, 0.15 * cm))
     story.append(Paragraph(
-        f"Generated by Portfolio Management Pro  ·  ESSCA  ·  Prof. Benoit Seguret  ·  {date.today()}",
+        f"Generated by Portfolio Management Pro  ·  ESSCA  ·  Prof. Olga Tatarnikova  ·  {date.today()}",
         ParagraphStyle("footer", fontSize=7, fontName="Helvetica-Oblique",
                        textColor=colors.HexColor("#9CA3AF"), alignment=TA_CENTER)
     ))
@@ -1781,7 +1771,7 @@ with st.sidebar:
 st.markdown(
     """<div class="pm-header">
          <h1>📊 Portfolio Management Pro</h1>
-         <p>Advanced Portfolio Construction & Performance Analysis · ESSCA · Prof. Benoit Seguret</p>
+         <p>Advanced Portfolio Construction & Performance Analysis · ESSCA · Prof. Olga Tatarnikova</p>
        </div>""",
     unsafe_allow_html=True,
 )
@@ -2331,8 +2321,7 @@ with tab3:
                     ))
                 fig_radar.update_layout(title="Strategy Comparison",
                                         polar=dict(radialaxis=dict(visible=True)),
-                                        height=400, **{k: v for k, v in PLOTLY_TEMPLATE.items()
-                                                       if k not in ["xaxis", "yaxis"]})
+                                        height=400, **PLOTLY_LAYOUT)
                 st.plotly_chart(fig_radar, use_container_width=True)
 
 
@@ -2411,11 +2400,8 @@ with tab4:
                 line=dict(color=DARK, width=1)
             )
         ))
-        fig_sml.update_layout(
-            title="📊 Security Market Line (CAPM) — Assets vs SML",
-            xaxis_title="Beta (β)", yaxis_title="Return (%)",
-            height=480, **PLOTLY_TEMPLATE
-        )
+        _apply_style(fig_sml, "📊 Security Market Line (CAPM) — Assets vs SML",
+                     "Beta (β)", "Return (%)", 480)
         st.plotly_chart(fig_sml, use_container_width=True)
 
         # Fama-French
@@ -2474,11 +2460,9 @@ with tab4:
                 textposition="outside",
             ))
             fig_ff.add_hline(y=0, line_color=DARK)
-            fig_ff.update_layout(
-                title=f"📊 Fama-French Factor Exposures  |  Ann. Alpha = {ff_results.get('Alpha (annualised)', 0):.2%}  |  R² = {ff_results.get('R²', 0):.3f}",
-                yaxis_title="Factor Loading (β)",
-                height=380, **PLOTLY_TEMPLATE
-            )
+            _apply_style(fig_ff,
+                f"📊 FF3 Factor Exposures | Alpha = {ff_results.get('Alpha (annualised)', 0):.2%} | R² = {ff_results.get('R²', 0):.3f}",
+                "", "Factor Loading (β)", 380)
             st.plotly_chart(fig_ff, use_container_width=True)
 
             if show_calcs:
