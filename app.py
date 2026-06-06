@@ -683,12 +683,12 @@ def fama_french_regression(port_ret: pd.Series, ff_data: pd.DataFrame) -> dict:
 # ============================================================
 
 # Base layout dict — no xaxis/yaxis keys to avoid conflicts with xaxis_title etc.
+# Base layout — no conflicting keys (title/xaxis/yaxis handled separately)
 PLOTLY_LAYOUT = dict(
     plot_bgcolor="#FFFFFF",
     paper_bgcolor="#FFFFFF",
     font=dict(family="Inter, sans-serif", color="#1C1C2E", size=12),
     colorway=[PRIMARY, ACCENT, SUCCESS, WARNING, "#9B59B6", "#1ABC9C", "#E67E22"],
-    title=dict(font=dict(color="#1C1C2E", size=14, family="Inter, sans-serif")),
     legend=dict(
         bgcolor="rgba(255,255,255,0.95)", bordercolor="#CBD5E1",
         borderwidth=1, orientation="h", yanchor="bottom", y=1.02,
@@ -698,7 +698,6 @@ PLOTLY_LAYOUT = dict(
     margin=dict(l=20, r=20, t=50, b=20),
 )
 
-# Axis style applied separately via update_xaxes / update_yaxes
 AXIS_STYLE = dict(
     showgrid=True, gridcolor="#E8ECF0", linecolor="#CBD5E1",
     tickfont=dict(color="#374151", size=11),
@@ -706,15 +705,20 @@ AXIS_STYLE = dict(
     zeroline=False,
 )
 
+TITLE_FONT = dict(color="#1C1C2E", size=14, family="Inter, sans-serif")
+
 def _apply_style(fig: go.Figure, title: str = "", xlabel: str = "",
                  ylabel: str = "", height: int = 420) -> go.Figure:
-    """Apply consistent visual style to any Plotly figure."""
-    fig.update_layout(title=title, height=height, **PLOTLY_LAYOUT)
+    """Apply consistent white-background style to any Plotly figure."""
+    fig.update_layout(
+        title=dict(text=title, font=TITLE_FONT),
+        height=height,
+        **PLOTLY_LAYOUT
+    )
     fig.update_xaxes(title_text=xlabel, **AXIS_STYLE)
     fig.update_yaxes(title_text=ylabel, **AXIS_STYLE)
     return fig
 
-# Keep backward-compat alias
 PLOTLY_TEMPLATE = PLOTLY_LAYOUT
 
 def make_equity_curve(cum_port: pd.Series, cum_bench: pd.Series,
