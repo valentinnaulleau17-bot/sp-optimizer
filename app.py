@@ -1,1559 +1,2077 @@
-# app_portfolio_sp500.py
-# ------------------------------------------------------------
-# Streamlit — S&P 500/400/600 Optimizer + Custom Portfolio
-# - Weight adjustment via +/- buttons (delta equally redistributed)
-# - Interactive Plotly equity curve + forward projection to horizon
-# - Correlation matrix (heatmap) WITH coefficients inside each cell
-# - Performance & risk metrics (Sharpe, Sortino, VaR, CVaR, Beta, Alpha, etc.)
-# - Export CSV + Export PDF (summary / full report incl. equity + corr + full table split)
-# ------------------------------------------------------------
+# ============================================================
+# Portfolio Management Pro — ESSCA Project
+# Prof. Olga Tatarnikova — Portfolio Management
+# ============================================================
+# Covers: Asset Allocation, MVO (Markowitz), Elton-Gruber,
+# Merton Two-Fund, Black-Litterman, CAPM, Fama-French 3F,
+# Active/Passive/Smart-Beta Strategies, Full Performance Eval
+# ============================================================
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 import streamlit as st
 import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+from scipy.optimize import minimize
 from datetime import date, timedelta
-from io import StringIO, BytesIO
-import requests
-import math
+from io import BytesIO
+import warnings
+warnings.filterwarnings("ignore")
 
-# --- Optional: Matplotlib for PDF images (recommended)
-# If your IDE shows "could not be resolved", it's usually a VSCode interpreter issue.
-# The app can still run; PDF will gracefully degrade if matplotlib is missing.
 try:
+    import matplotlib
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    from matplotlib.gridspec import GridSpec
     MATPLOTLIB_OK = True
 except Exception:
     MATPLOTLIB_OK = False
 
-# --- PDF (ReportLab)
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer,
-    Table as RLTable, TableStyle, Image as RLImage,
-    PageBreak
+    SimpleDocTemplate, Paragraph, Spacer, Table as RLTable,
+    TableStyle, Image as RLImage, PageBreak, HRFlowable
 )
 from reportlab.lib.units import cm
-
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 # ============================================================
-# App Config
+# CONFIG & CONSTANTS
 # ============================================================
-st.set_page_config(page_title="Portfolio Optimizer Pro", layout="wide")
+st.set_page_config(
+    page_title="Portfolio Management Pro",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 TRADING_DAYS = 252
 
+# ── Brand colours ──────────────────────────────────────────
+PRIMARY   = "#C8102E"   # ESSCA red
+DARK      = "#1C1C2E"   # deep navy
+CARD_BG   = "#F7F9FC"
+TEXT_DARK = "#1C1C2E"
+ACCENT    = "#2E86AB"   # cool blue
+SUCCESS   = "#2ECC71"
+WARNING   = "#F39C12"
+
+# ── Custom CSS ─────────────────────────────────────────────
+st.markdown(f"""
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
+
+  /* Sidebar */
+  section[data-testid="stSidebar"] {{
+      background: {DARK};
+  }}
+  section[data-testid="stSidebar"] * {{
+      color: #FFFFFF !important;
+  }}
+  section[data-testid="stSidebar"] .stSelectbox label,
+  section[data-testid="stSidebar"] .stMultiSelect label,
+  section[data-testid="stSidebar"] .stSlider label,
+  section[data-testid="stSidebar"] .stNumberInput label {{
+      color: #CBD5E1 !important;
+      font-size: 0.82rem;
+  }}
+
+  /* Header banner */
+  .pm-header {{
+      background: linear-gradient(135deg, {DARK} 0%, #2D2D44 100%);
+      padding: 1.4rem 2rem;
+      border-radius: 12px;
+      margin-bottom: 1.5rem;
+      border-left: 5px solid {PRIMARY};
+  }}
+  .pm-header h1 {{
+      color: #FFFFFF;
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin: 0;
+  }}
+  .pm-header p {{
+      color: #94A3B8;
+      margin: 0.25rem 0 0 0;
+      font-size: 0.9rem;
+  }}
+
+  /* Section titles */
+  .section-title {{
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: {DARK};
+      border-left: 4px solid {PRIMARY};
+      padding-left: 0.75rem;
+      margin: 1.5rem 0 0.75rem 0;
+  }}
+
+  /* KPI cards */
+  .kpi-card {{
+      background: {CARD_BG};
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+      border: 1px solid #E2E8F0;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }}
+  .kpi-label {{
+      font-size: 0.75rem;
+      color: #64748B;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+  }}
+  .kpi-value {{
+      font-size: 1.55rem;
+      font-weight: 700;
+      color: {DARK};
+      margin-top: 0.15rem;
+  }}
+  .kpi-value.positive {{ color: {SUCCESS}; }}
+  .kpi-value.negative {{ color: {PRIMARY}; }}
+
+  /* Method card */
+  .method-card {{
+      background: white;
+      border: 1px solid #E2E8F0;
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 0.75rem;
+  }}
+
+  /* Formula box */
+  .formula-box {{
+      background: #F1F5F9;
+      border-left: 3px solid {ACCENT};
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      color: {DARK};
+      margin: 0.5rem 0;
+  }}
+
+  /* Tabs */
+  .stTabs [data-baseweb="tab-list"] {{
+      background: {CARD_BG};
+      border-radius: 8px;
+      padding: 4px;
+  }}
+  .stTabs [data-baseweb="tab"] {{
+      border-radius: 6px;
+      font-weight: 500;
+  }}
+  .stTabs [aria-selected="true"] {{
+      background: {PRIMARY} !important;
+      color: white !important;
+  }}
+
+  /* Download button */
+  .stDownloadButton button {{
+      background: {PRIMARY};
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      padding: 0.6rem 1.5rem;
+      transition: opacity 0.2s;
+  }}
+  .stDownloadButton button:hover {{ opacity: 0.88; }}
+
+  /* Divider */
+  hr {{ border: none; border-top: 1px solid #E2E8F0; margin: 1rem 0; }}
+
+  /* Expander */
+  .streamlit-expanderHeader {{
+      background: #F8FAFC;
+      border-radius: 6px;
+      font-weight: 500;
+  }}
+</style>
+""", unsafe_allow_html=True)
+
 
 # ============================================================
-# Helpers — weights
+# GEOGRAPHIC UNIVERSE
 # ============================================================
-def _normalize_weights(w: pd.Series) -> pd.Series:
-    w = w.copy()
-    w = w.clip(lower=0.0)
-    s = float(w.sum())
-    return (w / s) if s > 0 else w
+UNIVERSE = {
+    "Americas": {
+        "🇺🇸 US Large Cap": ["AAPL","MSFT","NVDA","AMZN","GOOGL","META","BRK-B","JPM","JNJ","V",
+                              "UNH","XOM","PG","MA","HD","CVX","ABBV","LLY","MRK","PEP"],
+        "🇺🇸 US Mid Cap": ["DECK","NVR","TRGP","PODD","EG","MANH","ELS","TXRH","SAIA","FICO"],
+        "🇺🇸 US Small Cap": ["BOOT","CELH","LBRT","SPSC","CRVL","QLYS","SWI","PRGS","WTS","BJ"],
+        "🇧🇷 Brazil": ["VALE","PBR","ITUB","BBDC4.SA","PETR4.SA","ABEV3.SA","B3SA3.SA","WEGE3.SA"],
+        "🇨🇦 Canada": ["RY","TD","ENB","CNR","BNS","BMO","TRP","CP","MFC","SU"],
+        "🇲🇽 Mexico": ["AMXL.MX","FEMSA","WALMEX.MX","GFINBURO.MX","BIMBOA.MX","GMEXICOB.MX"],
+    },
+    "France": {
+        "🇫🇷 CAC 40": ["MC.PA","TTE.PA","SAN.PA","AIR.PA","BNP.PA","OR.PA","RI.PA","SU.PA",
+                        "DG.PA","AI.PA","ACA.PA","ENGI.PA","SGO.PA","ORA.PA","VIE.PA",
+                        "LR.PA","CAP.PA","BN.PA","KER.PA","PUB.PA"],
+        "🇫🇷 Mid Cap": ["ALSTOM.PA","BIOCAD.PA","COFA.PA","DBV.PA","ABCA.PA","FP.PA"],
+    },
+    "Germany": {
+        "🇩🇪 DAX": ["SAP","SIE.DE","ALV.DE","MUV2.DE","DTE.DE","BMW.DE","MBG.DE","BAYN.DE",
+                    "BAS.DE","VOW3.DE","RWE.DE","DB1.DE","HEI.DE","IFX.DE","HEN3.DE",
+                    "DHER.DE","EOAN.DE","PAH3.DE","QIA.DE","ZAL.DE"],
+    },
+    "United Kingdom": {
+        "🇬🇧 FTSE 100": ["AZN.L","SHEL.L","HSBA.L","ULVR.L","BP.L","RIO.L","GSK.L","BATS.L",
+                          "LLOY.L","BARC.L","VOD.L","DGE.L","NG.L","LSEG.L","IMB.L",
+                          "CPG.L","RKT.L","AAL.L","PRU.L","WPP.L"],
+    },
+    "Spain": {
+        "🇪🇸 IBEX 35": ["ITX.MC","SAN.MC","BBVA.MC","IBE.MC","REP.MC","TEF.MC","CLNX.MC",
+                         "ACS.MC","ELE.MC","GRF.MC","FER.MC","MAP.MC","MTS.MC","AENA.MC","CABK.MC"],
+    },
+    "Italy": {
+        "🇮🇹 FTSE MIB": ["ENI.MI","ENEL.MI","ISP.MI","UCG.MI","TIT.MI","ATL.MI","STM.MI",
+                           "MB.MI","G.MI","LDO.MI","BAMI.MI","PIRC.MI","AMP.MI","CPR.MI","TRN.MI"],
+    },
+    "Europe (Full)": {
+        "🌍 Eurozone": ["ASML","LVMH","SAP","NOVO-B.CO","SIE.DE","TotalEnergies","AZN.L",
+                        "ROG.SW","NESN.SW","NOVN.SW","ABB.SW","UBS","CS"],
+        "🇸🇪 Sweden": ["VOLV-B.ST","ERIC-B.ST","SHB-A.ST","SWED-A.ST","SKA-B.ST","INVE-B.ST"],
+        "🇳🇱 Netherlands": ["ASML","AD.AS","PHIA.AS","HEIA.AS","NN.AS","RDSA.AS"],
+        "🇨🇭 Switzerland": ["ROG.SW","NESN.SW","NOVN.SW","ABB.SW","LONN.SW","CFR.SW"],
+    },
+    "Asia & Middle East": {
+        "🇯🇵 Japan": ["7203.T","6758.T","8306.T","9432.T","4502.T","6861.T","8058.T","7267.T","6902.T","4063.T"],
+        "🇨🇳 China": ["BABA","JD","PDD","BIDU","NIO","XPEV","LI","TCEHY","NTES","BILI"],
+        "🇮🇳 India": ["INFY","WIT","HDB","IBN","SIFY","ICICIB","AXISB","TATASTEEL.NS"],
+        "🇰🇷 South Korea": ["005930.KS","000660.KS","035420.KS","051910.KS","005380.KS"],
+        "🇸🇬 Singapore": ["D05.SI","O39.SI","U11.SI","Z74.SI","C6L.SI"],
+        "🇸🇦 Saudi Arabia / Gulf": ["2222.SR","1120.SR","2010.SR","1150.SR","SABIC"],
+        "🇷🇺 Russia (ADR/intl)": ["SBER","GAZP","LUKOY","ROSN","NVTK"],
+    },
+}
 
-def capm_portfolio_metrics(
-    asset_rets: pd.DataFrame,
-    weights: pd.Series,
-    mkt_rets: pd.Series,
-    rf_annual: float,
-    erp_annual: float,
-) -> dict:
-    df = asset_rets.join(mkt_rets.rename("MKT"), how="inner").dropna()
-    w = weights.reindex(asset_rets.columns).fillna(0.0)
+ALL_REGIONS = list(UNIVERSE.keys())
 
-    port = (df[asset_rets.columns] @ w).rename("PORT")
-    X = df["MKT"].values
-    y = port.values
-    x_var = float(np.var(X, ddof=0) + 1e-12)
+# Flatten universe to get all tickers
+def get_tickers_for_regions(regions: list) -> list:
+    tickers = []
+    for region in regions:
+        for subgroup, tkrs in UNIVERSE.get(region, {}).items():
+            tickers.extend(tkrs)
+    return list(dict.fromkeys(tickers))  # deduplicate preserving order
 
-    beta_p = float(np.cov(y, X, ddof=0)[0, 1] / x_var)
 
-    a = float(y.mean() - beta_p * X.mean())
-    y_hat = a + beta_p * X
-    ss_res = float(((y - y_hat) ** 2).sum())
-    ss_tot = float(((y - y.mean()) ** 2).sum() + 1e-12)
-    r2_p = 1.0 - ss_res / ss_tot
+# ============================================================
+# DATA LAYER
+# ============================================================
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_prices(tickers: tuple, start: str, end: str) -> pd.DataFrame:
+    """Download adjusted close prices for a list of tickers."""
+    try:
+        raw = yf.download(list(tickers), start=start, end=end,
+                          auto_adjust=True, progress=False)
+        if isinstance(raw.columns, pd.MultiIndex):
+            prices = raw["Close"]
+        else:
+            prices = raw
+        prices = prices.dropna(axis=1, thresh=int(0.7 * len(prices)))
+        return prices
+    except Exception as e:
+        st.error(f"Data fetch error: {e}")
+        return pd.DataFrame()
 
-    realized_ann = float((1.0 + port).prod() ** (TRADING_DAYS / len(port)) - 1.0)
-    capm_exp_ann = float(rf_annual + beta_p * erp_annual)
-    alpha_ann = float(realized_ann - capm_exp_ann)
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_ff3_factors(start: str, end: str) -> pd.DataFrame:
+    """
+    Fetch Ken French 3-factor data via pandas_datareader (Fama-French library).
+    Returns daily Mkt-RF, SMB, HML, RF columns.
+    """
+    try:
+        import pandas_datareader.data as web
+        ff = web.DataReader("F-F_Research_Data_Factors_daily", "famafrench",
+                            start=start, end=end)[0]
+        ff = ff / 100.0
+        ff.index = pd.to_datetime(ff.index)
+        return ff
+    except Exception:
+        return pd.DataFrame()
 
-    return {
-        "CAPM Beta (Portfolio)": beta_p,
-        "CAPM Exp Return (ann.) (Portfolio)": capm_exp_ann,
-        "CAPM Alpha (ann.) (Portfolio)": alpha_ann,
-        "CAPM R² (Portfolio)": r2_p,
+
+def compute_returns(prices: pd.DataFrame) -> pd.DataFrame:
+    return prices.pct_change().dropna()
+
+def annualize_returns(rets: pd.DataFrame) -> pd.Series:
+    return (1 + rets).prod() ** (TRADING_DAYS / len(rets)) - 1
+
+def annualize_vol(rets: pd.DataFrame) -> pd.Series:
+    return rets.std() * np.sqrt(TRADING_DAYS)
+
+def cov_matrix(rets: pd.DataFrame) -> pd.DataFrame:
+    return rets.cov() * TRADING_DAYS
+
+
+# ============================================================
+# OPTIMIZATION ENGINE
+# ============================================================
+
+def portfolio_stats(weights, mu, sigma):
+    """Return (ret, vol, sharpe) for given weights."""
+    w = np.array(weights)
+    ret = float(w @ mu)
+    vol = float(np.sqrt(w @ sigma @ w))
+    sr = ret / vol if vol > 1e-10 else 0.0
+    return ret, vol, sr
+
+
+def gmv_portfolio(sigma: np.ndarray) -> np.ndarray:
+    """Global Minimum Variance portfolio — closed-form via Lagrange."""
+    n = sigma.shape[0]
+    try:
+        inv_sigma = np.linalg.inv(sigma)
+        ones = np.ones(n)
+        w = inv_sigma @ ones
+        return w / w.sum()
+    except np.linalg.LinAlgError:
+        return np.ones(n) / n
+
+
+def tangency_portfolio(mu: np.ndarray, sigma: np.ndarray, rf: float = 0.0) -> np.ndarray:
+    """Max Sharpe (Tangency) portfolio — Elton-Gruber / analytic."""
+    n = sigma.shape[0]
+    excess = mu - rf
+    try:
+        inv_sigma = np.linalg.inv(sigma)
+        w = inv_sigma @ excess
+        if w.sum() <= 0:
+            w = np.abs(w)
+        return w / w.sum()
+    except np.linalg.LinAlgError:
+        return np.ones(n) / n
+
+
+def elton_gruber_tangency(mu: np.ndarray, sigma: np.ndarray, rf: float) -> dict:
+    """
+    Elton & Gruber (1977) simplified tangency portfolio.
+    Returns weights + intermediate calculation steps.
+    """
+    n = sigma.shape[0]
+    excess = mu - rf
+    try:
+        inv_sigma = np.linalg.inv(sigma)
+    except np.linalg.LinAlgError:
+        inv_sigma = np.linalg.pinv(sigma)
+
+    z = inv_sigma @ excess
+    z_sum = z.sum()
+    if z_sum <= 0:
+        z = np.abs(z)
+        z_sum = z.sum()
+    w = z / z_sum if z_sum > 0 else np.ones(n) / n
+
+    steps = {
+        "Excess returns (μ - Rf)": excess,
+        "Σ⁻¹ · (μ - Rf)  [z-vector]": z,
+        "Unnormalized sum": z_sum,
+        "Final weights": w,
     }
+    return w, steps
 
-def capm_by_asset(
-    asset_rets: pd.DataFrame,
-    mkt_rets: pd.Series,
-    rf_annual: float,
-    erp_annual: float,
-) -> pd.DataFrame:
+
+def merton_two_fund(mu: np.ndarray, sigma: np.ndarray, rf: float,
+                    target_ret: float) -> dict:
     """
-    Compute CAPM metrics per asset (annualized where relevant).
-
-    Outputs (per asset):
-    - CAPM Beta
-    - CAPM Expected Return (ann.) = rf + beta * ERP
-    - CAPM Alpha (ann.) = realized_ann - capm_exp_ann
-    - CAPM R² (regression fit vs market)
+    Merton two-fund separation:
+    Any efficient portfolio = combination of GMV + Tangency.
+    Returns weights for given target return + derivation steps.
     """
+    w_gmv = gmv_portfolio(sigma)
+    w_tan = tangency_portfolio(mu, sigma, rf)
 
-    # Align dates
-    df = asset_rets.join(mkt_rets.rename("MKT"), how="inner").dropna()
-    X = df["MKT"].values
-    x_var = float(np.var(X, ddof=0) + 1e-12)
+    ret_gmv, _, _ = portfolio_stats(w_gmv, mu, sigma)
+    ret_tan, _, _ = portfolio_stats(w_tan, mu, sigma)
 
-    rf_annual = float(rf_annual)
-    erp_annual = float(erp_annual)
-
-    out = {}
-    for col in asset_rets.columns:
-        if col not in df.columns:
-            continue
-
-        y = df[col].values
-
-        # CAPM beta
-        beta = float(np.cov(y, X, ddof=0)[0, 1] / x_var)
-
-        # R² of regression y ~ a + beta * X
-        a = float(y.mean() - beta * X.mean())
-        y_hat = a + beta * X
-        ss_res = float(((y - y_hat) ** 2).sum())
-        ss_tot = float(((y - y.mean()) ** 2).sum() + 1e-12)
-        r2 = 1.0 - ss_res / ss_tot
-
-        # Realized annual return (geometric)
-        realized_ann = float(
-            (1.0 + df[col]).prod() ** (TRADING_DAYS / len(df)) - 1.0
-        )
-
-        # CAPM expected return & alpha
-        capm_exp_ann = float(rf_annual + beta * erp_annual)
-        capm_alpha_ann = float(realized_ann - capm_exp_ann)
-
-        out[col] = {
-            "CAPM Beta": beta,
-            "CAPM Exp Return (ann.)": capm_exp_ann,
-            "CAPM Alpha (ann.)": capm_alpha_ann,
-            "CAPM R²": r2,
-        }
-
-    return pd.DataFrame.from_dict(out, orient="index")
-
-def rebalance_equal_others(w: pd.Series, changed: str, new_value: float) -> pd.Series:
-    """
-    Set w[changed] = new_value, redistribute delta equally across all other tickers.
-    Enforces w>=0 and sum(w)=1.
-    """
-    w = w.copy()
-    tickers = w.index.tolist()
-    n = len(tickers)
-    if n <= 1:
-        w.iloc[0] = 1.0
-        return w
-
-    old_value = float(w[changed])
-    new_value = float(np.clip(new_value, 0.0, 1.0))
-    delta = new_value - old_value
-    if abs(delta) < 1e-12:
-        return _normalize_weights(w)
-
-    w[changed] = new_value
-    others = [t for t in tickers if t != changed]
-
-    remaining = -delta  # must be distributed among others
-    active = others.copy()
-
-    # Robust redistribution loop (handles hitting 0 constraints)
-    for _ in range(50):
-        if len(active) == 0 or abs(remaining) < 1e-12:
-            break
-
-        share = remaining / len(active)
-
-        if share >= 0:
-            for t in active:
-                w[t] = float(w[t]) + share
-            remaining = 0.0
-            break
-
-        # share < 0 => decreasing others; some may hit 0
-        new_vals = {}
-        hit_zero = []
-        for t in active:
-            nv = float(w[t]) + share
-            if nv < 0:
-                nv = 0.0
-                hit_zero.append(t)
-            new_vals[t] = nv
-
-        before = float(w[active].sum())
-        after = float(sum(new_vals.values()))
-        actually_applied = after - before  # <= 0
-        remaining -= actually_applied  # remaining still to distribute
-
-        for t, nv in new_vals.items():
-            w[t] = nv
-
-        active = [t for t in active if t not in hit_zero]
-
-    return _normalize_weights(w)
-
-
-# ============================================================
-# Universe: S&P tickers
-# ============================================================
-@st.cache_data(show_spinner=False)
-def get_sp_tickers_csv(url: str):
-    r = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
-    r.raise_for_status()
-    df = pd.read_csv(StringIO(r.text))
-    tickers = df["Symbol"].astype(str).str.replace(".", "-", regex=False).tolist()
-    return tickers, df
-
-
-@st.cache_data(show_spinner=False)
-def get_sp_tickers_wiki(url: str, table_idx: int = 0, symbol_col: str = "Symbol"):
-    html = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"}).text
-    tables = pd.read_html(StringIO(html))
-    df = tables[table_idx]
-    tickers = df[symbol_col].astype(str).str.replace(".", "-", regex=False).tolist()
-    return tickers, df
-
-
-def get_sp500_tickers():
-    return get_sp_tickers_csv("https://datahub.io/core/s-and-p-500-companies/r/constituents.csv")
-
-
-def get_sp400_tickers():
-    return get_sp_tickers_wiki("https://en.wikipedia.org/wiki/List_of_S%26P_400_companies", table_idx=0, symbol_col="Symbol")
-
-
-def get_sp600_tickers():
-    return get_sp_tickers_wiki("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies", table_idx=0, symbol_col="Symbol")
-
-
-# ============================================================
-# Data fetching
-# ============================================================
-@st.cache_data(show_spinner=False)
-def fetch_prices(tickers, years=5):
-    end = date.today()
-    start = end - timedelta(days=int(years * 365.25) + 10)
-
-    data = yf.download(
-        tickers=tickers,
-        start=start.isoformat(),
-        end=end.isoformat(),
-        interval="1d",
-        auto_adjust=True,
-        group_by="column",
-        threads=True,
-        progress=False,
-    )
-
-    if data is None or len(data) == 0:
-        raise RuntimeError("yfinance returned an empty DataFrame.")
-
-    if isinstance(data.columns, pd.MultiIndex):
-        level0 = data.columns.get_level_values(0).unique().tolist()
-        field = "Close" if "Close" in level0 else ("Adj Close" if "Adj Close" in level0 else None)
-        if field is None:
-            raise RuntimeError(f"Price field not found. Available fields: {level0}")
-        px = data[field].copy()
+    # Interpolate: w = alpha * tan + (1 - alpha) * gmv
+    denom = ret_tan - ret_gmv
+    if abs(denom) < 1e-8:
+        alpha = 0.5
     else:
-        cols = data.columns.tolist()
-        if "Close" in cols:
-            px = data[["Close"]].copy()
-        elif "Adj Close" in cols:
-            px = data[["Adj Close"]].copy()
-        else:
-            raise RuntimeError(f"Close column not found. Available columns: {cols}")
-        if len(tickers) == 1:
-            px.columns = [tickers[0]]
-        else:
-            px.columns = ["PRICE"]
+        alpha = (target_ret - ret_gmv) / denom
+    alpha = float(np.clip(alpha, -0.5, 2.0))  # allow mild leverage
 
-    px = px.dropna(how="all").ffill()
-    px.columns = [str(c).replace(".", "-") for c in px.columns]
-    px = px.dropna(axis=1, how="all").dropna(how="all")
+    w = alpha * w_tan + (1 - alpha) * w_gmv
+    w = np.clip(w, 0, None)
+    w = w / w.sum()
 
-    if px.shape[1] == 0:
-        raise RuntimeError("All tickers failed to download (empty columns).")
-
-    return px
+    steps = {
+        "GMV weights": w_gmv,
+        "Tangency weights": w_tan,
+        "Return(GMV)": ret_gmv,
+        "Return(Tangency)": ret_tan,
+        "Alpha (mixing coefficient)": alpha,
+        "Combined weights": w,
+    }
+    return w, steps
 
 
-@st.cache_data(show_spinner=False)
-def fetch_fundamentals_yf(tickers):
-    rows = []
+def efficient_frontier_points(mu: np.ndarray, sigma: np.ndarray,
+                               rf: float = 0.0, n_points: int = 60) -> pd.DataFrame:
+    """
+    Compute efficient frontier by solving min-variance for a range of target returns.
+    Uses scipy.optimize with equality constraints (no short selling).
+    """
+    n = len(mu)
+    bounds = tuple((0.0, 1.0) for _ in range(n))
+    constraints_base = [{"type": "eq", "fun": lambda w: w.sum() - 1}]
+
+    ret_min = float(mu.min())
+    ret_max = float(mu.max())
+    targets = np.linspace(ret_min * 1.01, ret_max * 0.99, n_points)
+
+    frontier = []
+    for target in targets:
+        cons = constraints_base + [
+            {"type": "eq", "fun": lambda w, t=target: (w @ mu) - t}
+        ]
+        w0 = np.ones(n) / n
+        res = minimize(
+            lambda w: w @ sigma @ w,
+            w0, method="SLSQP",
+            bounds=bounds, constraints=cons,
+            options={"ftol": 1e-9, "maxiter": 500}
+        )
+        if res.success:
+            w = res.x
+            ret, vol, sr = portfolio_stats(w, mu, sigma)
+            frontier.append({"Return": ret, "Volatility": vol, "Sharpe": sr,
+                              "Weights": w})
+
+    return pd.DataFrame(frontier)
+
+
+def black_litterman(mu_eq: np.ndarray, sigma: np.ndarray,
+                    P: np.ndarray, Q: np.ndarray,
+                    omega_diag: np.ndarray, tau: float = 0.025) -> dict:
+    """
+    Black-Litterman model.
+    mu_eq  : equilibrium (CAPM-implied) returns  [n]
+    sigma  : annualised covariance matrix         [n x n]
+    P      : picking matrix (K x n)
+    Q      : view returns vector (K,)
+    omega_diag : variance of views (K,) → diagonal of Ω
+    tau    : scalar uncertainty on prior (typically 0.01-0.05)
+
+    Returns BL posterior mean, posterior cov, and intermediate steps.
+    """
+    n = len(mu_eq)
+    K = len(Q)
+
+    tau_sigma = tau * sigma
+    Omega = np.diag(omega_diag)
+
+    # BL master formula
+    A = np.linalg.inv(tau_sigma) + P.T @ np.linalg.inv(Omega) @ P
+    b = np.linalg.inv(tau_sigma) @ mu_eq + P.T @ np.linalg.inv(Omega) @ Q
+
+    mu_bl = np.linalg.solve(A, b)
+    sigma_bl = np.linalg.inv(A) + sigma  # posterior uncertainty + inherent variance
+
+    # Optimal weights from BL posterior (max Sharpe)
+    w_bl = tangency_portfolio(mu_bl, sigma_bl)
+
+    steps = {
+        "Equilibrium returns (Π)": mu_eq,
+        "τ·Σ (prior covariance scaling)": tau_sigma,
+        "Ω (view uncertainty matrix)": Omega,
+        "P (picking matrix)": P,
+        "Q (view returns)": Q,
+        "BL Posterior mean (μ_BL)": mu_bl,
+        "BL Posterior covariance": sigma_bl,
+        "Optimal BL weights": w_bl,
+    }
+    return w_bl, mu_bl, sigma_bl, steps
+
+
+# ============================================================
+# PERFORMANCE METRICS
+# ============================================================
+
+def portfolio_returns(rets: pd.DataFrame, weights: pd.Series) -> pd.Series:
+    w = weights.reindex(rets.columns).fillna(0.0)
+    w = w / w.sum()
+    return (rets * w).sum(axis=1)
+
+def max_drawdown(cum_series: pd.Series) -> float:
+    roll_max = cum_series.cummax()
+    drawdown = cum_series / roll_max - 1
+    return float(drawdown.min())
+
+def sharpe(port_ret: pd.Series, rf_annual: float = 0.0) -> float:
+    rf_d = rf_annual / TRADING_DAYS
+    excess = port_ret - rf_d
+    return float(excess.mean() / excess.std(ddof=1) * np.sqrt(TRADING_DAYS)) if excess.std() > 1e-10 else 0.0
+
+def sortino(port_ret: pd.Series, rf_annual: float = 0.0) -> float:
+    rf_d = rf_annual / TRADING_DAYS
+    excess = port_ret - rf_d
+    downside = excess[excess < 0].std(ddof=1) * np.sqrt(TRADING_DAYS)
+    return float(excess.mean() * TRADING_DAYS / downside) if downside > 1e-10 else 0.0
+
+def treynor(port_ret: pd.Series, bench_ret: pd.Series, rf_annual: float = 0.0) -> float:
+    rf_d = rf_annual / TRADING_DAYS
+    beta = _beta(port_ret, bench_ret)
+    ann_excess = (port_ret - rf_d).mean() * TRADING_DAYS
+    return float(ann_excess / beta) if abs(beta) > 1e-6 else 0.0
+
+def information_ratio(port_ret: pd.Series, bench_ret: pd.Series) -> float:
+    active = port_ret - bench_ret
+    te = active.std(ddof=1) * np.sqrt(TRADING_DAYS)
+    return float(active.mean() * TRADING_DAYS / te) if te > 1e-10 else 0.0
+
+def _beta(port_ret: pd.Series, bench_ret: pd.Series) -> float:
+    aligned = pd.concat([port_ret, bench_ret], axis=1).dropna()
+    if len(aligned) < 10:
+        return 1.0
+    cov = np.cov(aligned.iloc[:, 0], aligned.iloc[:, 1], ddof=1)
+    return float(cov[0, 1] / (cov[1, 1] + 1e-12))
+
+def jensen_alpha(port_ret: pd.Series, bench_ret: pd.Series, rf_annual: float) -> float:
+    rf_d = rf_annual / TRADING_DAYS
+    b = _beta(port_ret, bench_ret)
+    ann_port = (1 + port_ret).prod() ** (TRADING_DAYS / len(port_ret)) - 1
+    ann_bench = (1 + bench_ret).prod() ** (TRADING_DAYS / len(bench_ret)) - 1
+    return float(ann_port - (rf_annual + b * (ann_bench - rf_annual)))
+
+def calmar(port_ret: pd.Series) -> float:
+    cum = (1 + port_ret).cumprod()
+    ann_ret = (cum.iloc[-1]) ** (TRADING_DAYS / len(cum)) - 1
+    mdd = abs(max_drawdown(cum))
+    return float(ann_ret / mdd) if mdd > 1e-10 else 0.0
+
+def tracking_error(port_ret: pd.Series, bench_ret: pd.Series) -> float:
+    active = (port_ret - bench_ret).dropna()
+    return float(active.std(ddof=1) * np.sqrt(TRADING_DAYS))
+
+def compute_all_metrics(port_ret: pd.Series, bench_ret: pd.Series,
+                        rf_annual: float) -> pd.DataFrame:
+    cum = (1 + port_ret).cumprod()
+    ann_ret = float((cum.iloc[-1]) ** (TRADING_DAYS / len(cum)) - 1)
+    ann_vol = float(port_ret.std(ddof=1) * np.sqrt(TRADING_DAYS))
+    b = _beta(port_ret, bench_ret)
+    te = tracking_error(port_ret, bench_ret)
+
+    metrics = {
+        "Annualised Return": f"{ann_ret:.2%}",
+        "Annualised Volatility": f"{ann_vol:.2%}",
+        "Sharpe Ratio": f"{sharpe(port_ret, rf_annual):.3f}",
+        "Sortino Ratio": f"{sortino(port_ret, rf_annual):.3f}",
+        "Treynor Ratio": f"{treynor(port_ret, bench_ret, rf_annual):.3f}",
+        "Information Ratio": f"{information_ratio(port_ret, bench_ret):.3f}",
+        "Jensen's Alpha (ann.)": f"{jensen_alpha(port_ret, bench_ret, rf_annual):.2%}",
+        "Max Drawdown": f"{abs(max_drawdown(cum)):.2%}",
+        "Calmar Ratio": f"{calmar(port_ret):.3f}",
+        "Beta (vs Benchmark)": f"{b:.3f}",
+        "Tracking Error (ann.)": f"{te:.2%}",
+    }
+    return pd.DataFrame(list(metrics.items()), columns=["Metric", "Value"])
+
+
+# ============================================================
+# STRATEGY BUILDERS
+# ============================================================
+
+def equal_weight(tickers: list) -> pd.Series:
+    n = len(tickers)
+    return pd.Series(1.0 / n, index=tickers)
+
+def market_cap_weight(tickers: list) -> pd.Series:
+    """Proxy market-cap weight using last available market cap from yfinance."""
+    caps = {}
+    for t in tickers:
+        try:
+            info = yf.Ticker(t).fast_info
+            caps[t] = getattr(info, "market_cap", None) or 1e9
+        except Exception:
+            caps[t] = 1e9
+    s = pd.Series(caps)
+    return s / s.sum()
+
+def momentum_weight(rets: pd.DataFrame, lookback: int = 126) -> pd.Series:
+    """12-1 month momentum: rank by past 6-month return, overweight top quartile."""
+    if len(rets) < lookback:
+        return equal_weight(rets.columns.tolist())
+    recent = rets.iloc[-lookback:]
+    mom = (1 + recent).prod() - 1
+    ranked = mom.rank(ascending=True)
+    # Top 25% get double weight, bottom 25% get half
+    w = ranked.copy().astype(float)
+    q75 = ranked.quantile(0.75)
+    q25 = ranked.quantile(0.25)
+    w[ranked >= q75] *= 2.0
+    w[ranked <= q25] *= 0.5
+    return w / w.sum()
+
+def low_volatility_weight(rets: pd.DataFrame) -> pd.Series:
+    """Smart-beta low-vol: weight inversely proportional to volatility."""
+    vol = rets.std()
+    inv_vol = 1.0 / (vol + 1e-10)
+    return inv_vol / inv_vol.sum()
+
+def value_weight(tickers: list) -> pd.Series:
+    """
+    Smart-beta value: proxy via book-to-market (P/B inverse).
+    Fallback to equal if unavailable.
+    """
+    pb = {}
     for t in tickers:
         try:
             info = yf.Ticker(t).info
-            rows.append({
-                "Ticker": t,
-                "Name": info.get("shortName"),
-                "Sector": info.get("sector"),
-                "MarketCap": info.get("marketCap"),
-                "Beta": info.get("beta"),
-                "PE_TTM": info.get("trailingPE"),
-                "PE_FWD": info.get("forwardPE"),
-                "PB": info.get("priceToBook"),
-                "ROE": info.get("returnOnEquity"),
-                "ProfitMargin": info.get("profitMargins"),
-                "DebtToEquity": info.get("debtToEquity"),
-                "DividendYield": info.get("dividendYield"),
-            })
+            pb_ratio = info.get("priceToBook", None)
+            if pb_ratio and pb_ratio > 0:
+                pb[t] = pb_ratio
         except Exception:
-            rows.append({"Ticker": t})
-    return pd.DataFrame(rows).set_index("Ticker")
-
-
-def compute_returns(prices: pd.DataFrame):
-    rets = prices.pct_change().dropna()
-    mu_daily = rets.mean()
-    cov_daily = rets.cov()
-    return rets, mu_daily, cov_daily
-
-
-def zscore(s: pd.Series):
-    s = pd.to_numeric(s, errors="coerce")
-    return (s - s.mean()) / (s.std(ddof=0) + 1e-12)
+            pass
+    if len(pb) < 2:
+        return equal_weight(tickers)
+    s = pd.Series(pb)
+    inv_pb = 1.0 / s  # higher book-to-price = more "value"
+    return inv_pb / inv_pb.sum()
 
 
 # ============================================================
-# Scenario-conditioned Monte Carlo (correlated GBM)
+# FAMA-FRENCH REGRESSION
 # ============================================================
-def adjust_corr(corr: np.ndarray, shrink: float):
-    n = corr.shape[0]
-    ones = np.ones((n, n))
-    a = float(np.clip(shrink, 0.0, 0.95))
-    out = (1 - a) * corr + a * ones
-    np.fill_diagonal(out, 1.0)
-    return np.clip(out, -0.99, 0.99)
 
-def mc_terminal_gbm_corr(S0: pd.Series, mu: pd.Series, sigma: np.ndarray, corr: np.ndarray,
-                        years: float, n_sims: int, seed: int):
-    rng = np.random.default_rng(seed)
-    tickers = list(S0.index)
-    n = len(tickers)
+def fama_french_regression(port_ret: pd.Series, ff_data: pd.DataFrame) -> dict:
+    """
+    Regress portfolio excess returns on FF3 factors: Mkt-RF, SMB, HML.
+    Returns alpha, betas, R², t-stats.
+    """
+    from scipy.stats import t as t_dist
 
-    L = _safe_cholesky(corr)
-    T = float(years)
+    merged = pd.concat([port_ret, ff_data], axis=1).dropna()
+    if len(merged) < 30:
+        return {}
 
-    Z = rng.standard_normal((n_sims, n)) @ L.T
+    y = merged.iloc[:, 0].values - merged["RF"].values  # excess return
+    X_raw = merged[["Mkt-RF", "SMB", "HML"]].values
+    X = np.column_stack([np.ones(len(y)), X_raw])
 
-    mu_vec = np.asarray(mu, dtype=float)
-    sig_vec = np.asarray(sigma, dtype=float)
+    # OLS
+    XtX_inv = np.linalg.pinv(X.T @ X)
+    betas = XtX_inv @ X.T @ y
+    y_hat = X @ betas
+    residuals = y - y_hat
+    n, k = X.shape
+    sigma2 = (residuals @ residuals) / (n - k)
+    var_b = sigma2 * XtX_inv
+    se = np.sqrt(np.diag(var_b))
+    t_stats = betas / (se + 1e-12)
+    p_vals = 2 * (1 - t_dist.cdf(np.abs(t_stats), df=n - k))
 
-    drift = (mu_vec - 0.5 * sig_vec**2) * T
-    diffusion = sig_vec * np.sqrt(T) * Z
+    ss_tot = ((y - y.mean()) ** 2).sum()
+    ss_res = (residuals ** 2).sum()
+    r2 = 1 - ss_res / (ss_tot + 1e-12)
 
-    ST = S0.values[None, :] * np.exp(drift[None, :] + diffusion)
-    return ST, tickers
+    alpha_ann = betas[0] * TRADING_DAYS
 
-
-def compute_sigma_and_corr(returns_df: pd.DataFrame, vol_mult: float, corr_shrink: float):
-    cov_annual = returns_df.cov() * TRADING_DAYS
-    sigma = np.sqrt(np.diag(cov_annual)) * float(vol_mult)
-
-    corr = returns_df.corr().values
-    corr_adj = adjust_corr(corr, float(corr_shrink))
-    return sigma, corr_adj
-
-
-def _safe_cholesky(corr: np.ndarray, max_tries: int = 10):
-    eps = 1e-10
-    A = corr.copy()
-    for _ in range(max_tries):
-        try:
-            return np.linalg.cholesky(A)
-        except np.linalg.LinAlgError:
-            eps *= 10
-            A = A.copy()
-            np.fill_diagonal(A, 1.0 + eps)
-
-    vals, vecs = np.linalg.eigh(corr)
-    vals = np.clip(vals, 1e-8, None)
-    A = vecs @ np.diag(vals) @ vecs.T
-    d = np.sqrt(np.diag(A))
-    A = A / (d[:, None] * d[None, :])
-    np.fill_diagonal(A, 1.0)
-    return np.linalg.cholesky(A)
-
-
-def mc_paths_gbm_corr(S0: pd.Series, mu: pd.Series, sigma: np.ndarray, corr: np.ndarray,
-                      years: float, steps_per_year: int, n_sims: int, seed: int):
-    rng = np.random.default_rng(seed)
-    tickers = list(S0.index)
-    n = len(tickers)
-    dt = 1.0 / steps_per_year
-    steps = int(years * steps_per_year)
-
-    L = _safe_cholesky(corr)
-
-    S = np.zeros((n_sims, steps + 1, n), dtype=float)
-    S[:, 0, :] = S0.values
-
-    mu_vec = mu.reindex(tickers).values.astype(float)
-    sig_vec = np.asarray(sigma, dtype=float)
-
-    for t in range(steps):
-        Z = rng.standard_normal((n_sims, n)) @ L.T
-        drift = (mu_vec - 0.5 * sig_vec**2) * dt
-        diffusion = (sig_vec * np.sqrt(dt)) * Z
-        S[:, t + 1, :] = S[:, t, :] * np.exp(drift + diffusion)
-
-    return S, tickers
-
-
-def compute_smart_mu(
-    fund: pd.DataFrame,
-    score: pd.Series,
-    rf: float,
-    erp: float,
-    k_alpha: float,
-    lambda_val: float
-):
-    # --- Normalisation
-    if isinstance(fund, pd.Series):
-        fund = fund.to_frame().T
-
-    df = fund.copy()
-    df["score"] = score.reindex(df.index)
-
-    # --- Beta (toujours Series)
-    if "Beta" not in df.columns:
-        df["Beta"] = np.nan
-
-    beta = pd.to_numeric(df["Beta"], errors="coerce")
-
-    if np.isscalar(beta):
-        beta = pd.Series(beta, index=df.index)
-
-    beta = beta.fillna(1.0).clip(0.0, 3.0)
-
-    # --- Score normalisé
-    sc = pd.to_numeric(df["score"], errors="coerce")
-    sc_z = (sc - sc.mean()) / (sc.std(ddof=0) + 1e-12)
-    alpha = float(k_alpha) * sc_z.fillna(0.0)
-
-    # --- Espérance CAPM + alpha + mean reversion
-    mu_capm = rf + beta * erp
-    mu_smart = mu_capm + alpha
-
-    if lambda_val > 0:
-        mu_smart = (1.0 - lambda_val) * mu_smart + lambda_val * mu_capm.mean()
-
-    # --- GARANTIE: on retourne toujours une Series
-    mu_smart = pd.to_numeric(mu_smart, errors="coerce").fillna(rf + erp)
-    return mu_smart
-
-
-def portfolio_projection_from_asset_paths(S_paths: np.ndarray, tickers: list[str], S0: pd.Series,
-                                         weights: pd.Series, V0: float):
-    w = weights.reindex(tickers).fillna(0.0).values
-    w = w / (w.sum() + 1e-12)
-    S0_vec = S0.reindex(tickers).values
-    rel = S_paths / S0_vec[None, None, :]
-    V = V0 * (rel * w[None, None, :]).sum(axis=2)
-    return V
+    return {
+        "Alpha (daily)": betas[0],
+        "Alpha (annualised)": alpha_ann,
+        "β_MktRF": betas[1],
+        "β_SMB": betas[2],
+        "β_HML": betas[3],
+        "t_alpha": t_stats[0],
+        "t_MktRF": t_stats[1],
+        "t_SMB": t_stats[2],
+        "t_HML": t_stats[3],
+        "p_alpha": p_vals[0],
+        "R²": r2,
+        "Adj. R²": 1 - (1 - r2) * (n - 1) / (n - k),
+        "N obs": n,
+    }
 
 
 # ============================================================
-# Horizon-driven selection & weight optimization
+# PLOTLY CHART HELPERS
 # ============================================================
-def compute_cvar(series_2d: pd.DataFrame, alpha: float = 0.05):
-    q = series_2d.quantile(alpha, axis=0)
-    mask = series_2d.le(q, axis=1)
-    return series_2d.where(mask).mean(axis=0)
 
+PLOTLY_TEMPLATE = dict(
+    plot_bgcolor="white",
+    paper_bgcolor="white",
+    font=dict(family="Inter, sans-serif", color=TEXT_DARK),
+    colorway=[PRIMARY, ACCENT, SUCCESS, WARNING, "#9B59B6", "#1ABC9C", "#E67E22"],
+    xaxis=dict(showgrid=True, gridcolor="#F1F5F9", linecolor="#E2E8F0"),
+    yaxis=dict(showgrid=True, gridcolor="#F1F5F9", linecolor="#E2E8F0"),
+    legend=dict(bgcolor="rgba(255,255,255,0.9)", bordercolor="#E2E8F0",
+                borderwidth=1, orientation="h", yanchor="bottom", y=1.02,
+                xanchor="right", x=1),
+    margin=dict(l=20, r=20, t=40, b=20),
+)
 
-def optimize_weights_terminal(term_prices: pd.DataFrame, S0: pd.Series,
-                              iters: int, seed: int,
-                              objective: str, risk_lambda: float,
-                              rf: float = 0.0, years: float = 1.0):
+def make_equity_curve(cum_port: pd.Series, cum_bench: pd.Series,
+                      port_label: str = "Portfolio",
+                      bench_label: str = "Benchmark") -> go.Figure:
+    base = 100.0
+    p = cum_port / cum_port.iloc[0] * base
+    b = cum_bench / cum_bench.iloc[0] * base
 
-    rng = np.random.default_rng(seed)
-    cols = list(term_prices.columns)
-    n = len(cols)
-
-    rel = term_prices.values / S0.reindex(cols).values
-    best_w, best_val = None, -1e18
-
-    for _ in range(int(iters)):
-        w = rng.random(n)
-        w = w / w.sum()
-        VT = (rel * w[None, :]).sum(axis=1)  # V0 = 1
-
-        # 1) Max expected terminal value
-        if objective == "Maximum Expected Return (Horizon-Based)":
-            val = float(VT.mean())
-
-        # 2) Max compounded growth (log-utility)
-        elif objective == "Compounded Growth Optimization":
-            val = float(np.log(VT + 1e-12).mean())
-
-        # 3) Max Sharpe ratio (terminal, cross-scenario)
-        elif objective == "Maximum Sharpe Ratio (Aggressive)":
-            rT = VT - 1.0
-            rf_h = (1.0 + float(rf))**float(years) - 1.0
-            ex = float(rT.mean() - rf_h)
-            sd = float(rT.std(ddof=0) + 1e-12)
-            val = ex / sd
-
-        # 4) Risk-adjusted return with downside protection (CVaR)
-        elif objective == "Risk-Adjusted Return":
-            rT = VT - 1.0
-            q = np.quantile(rT, 0.05)
-            cvar = float(rT[rT <= q].mean())
-            tail_loss = -cvar
-            val = float(rT.mean() - float(risk_lambda) * tail_loss)
-
-        else:
-            raise ValueError(f"Unknown objective: {objective}")
-
-        if val > best_val:
-            best_val = val
-            best_w = w.copy()
-
-    return pd.Series(best_w, index=cols), best_val
-
-
-def portfolio_series(returns: pd.DataFrame, weights: pd.Series):
-    weights = weights.reindex(returns.columns).fillna(0.0)
-    port_ret = returns @ weights
-    cum = (1 + port_ret).cumprod()
-    return port_ret, cum
-
-
-# ============================================================
-# Metrics
-# ============================================================
-def max_drawdown(cum_curve: pd.Series) -> float:
-    peak = cum_curve.cummax()
-    dd = (cum_curve / peak) - 1.0
-    return float(dd.min())
-
-
-def sharpe_ratio(daily_ret: pd.Series, rf_annual: float) -> float:
-    rf_daily = (1 + rf_annual) ** (1 / TRADING_DAYS) - 1
-    ex = daily_ret - rf_daily
-    return float(ex.mean() / (ex.std(ddof=0) + 1e-12) * np.sqrt(TRADING_DAYS))
-
-
-def sortino_ratio(daily_ret: pd.Series, rf_annual: float) -> float:
-    rf_daily = (1 + rf_annual) ** (1 / TRADING_DAYS) - 1
-    ex = daily_ret - rf_daily
-    downside = ex.copy()
-    downside[downside > 0] = 0.0
-    dd = np.sqrt((downside**2).mean())
-    return float(ex.mean() / (dd + 1e-12) * np.sqrt(TRADING_DAYS))
-
-
-def beta_alpha_vs_benchmark(port_daily: pd.Series, bench_daily: pd.Series, rf_annual: float):
-    # beta = cov(port, bench)/var(bench), alpha annualized from CAPM line
-    rf_daily = (1 + rf_annual) ** (1 / TRADING_DAYS) - 1
-    y = (port_daily - rf_daily).values
-    x = (bench_daily - rf_daily).values
-    cov = np.cov(x, y, ddof=0)[0, 1]
-    var = np.var(x, ddof=0)
-    beta = cov / (var + 1e-12)
-    alpha_daily = np.mean(y) - beta * np.mean(x)
-    alpha_annual = (1 + alpha_daily) ** TRADING_DAYS - 1
-    return float(beta), float(alpha_annual)
-
-
-def var_parametric(daily_ret: pd.Series, alpha: float = 0.05):
-    # Normal VaR (loss as positive)
-    mu = float(daily_ret.mean())
-    sigma = float(daily_ret.std(ddof=0))
-    z = float(pd.Series(np.random.normal(size=200000)).quantile(alpha))  # stable approx
-    # VaR on return distribution: quantile of returns
-    q = mu + z * sigma
-    return float(-q)  # loss positive
-
-
-def var_historical(daily_ret: pd.Series, alpha: float = 0.05):
-    q = float(daily_ret.quantile(alpha))
-    return float(-q)
-
-
-def cvar_historical(daily_ret: pd.Series, alpha: float = 0.05):
-    q = float(daily_ret.quantile(alpha))
-    tail = daily_ret[daily_ret <= q]
-    return float(-tail.mean()) if len(tail) else float("nan")
-
-
-# ============================================================
-# Plotly — correlation heatmap with coefficients inside cells
-# ============================================================
-def plot_corr_heatmap_with_text(corr: pd.DataFrame, title: str):
-    z = corr.values
-    txt = np.vectorize(lambda x: f"{x:.2f}")(z)
-
-    fig = go.Figure(
-        data=go.Heatmap(
-            z=z,
-            x=corr.columns.tolist(),
-            y=corr.index.tolist(),
-            zmin=-1, zmax=1,
-            colorscale="Blues",
-            colorbar=dict(title="Corr", thickness=12),
-            hovertemplate="x=%{x}<br>y=%{y}<br>corr=%{z:.3f}<extra></extra>"
-        )
-    )
-    # text layer
-    fig.add_trace(
-        go.Scatter(
-            x=np.repeat(corr.columns.values, len(corr.index)),
-            y=np.tile(corr.index.values, len(corr.columns)),
-            mode="text",
-            text=txt.flatten(),
-            textfont=dict(size=12, color="black"),
-            hoverinfo="skip",
-        )
-    )
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=p.index, y=p.values, mode="lines",
+                             name=port_label, line=dict(color=PRIMARY, width=2.5)))
+    fig.add_trace(go.Scatter(x=b.index, y=b.values, mode="lines",
+                             name=bench_label, line=dict(color=ACCENT, width=2, dash="dot")))
     fig.update_layout(
-        title=title,
-        margin=dict(l=40, r=40, t=50, b=40),
-        height=520,
+        title="📈 Portfolio vs Benchmark — Equity Curve (base 100)",
+        height=420, xaxis_title="Date", yaxis_title="Index (base 100)",
+        **PLOTLY_TEMPLATE
     )
-    fig.update_xaxes(tickangle=-45)
+    return fig
+
+def make_frontier_chart(frontier: pd.DataFrame, gmv_point: tuple,
+                        tan_point: tuple, selected_point: tuple = None,
+                        cml_rf: float = None) -> go.Figure:
+    fig = go.Figure()
+
+    # Frontier curve
+    fig.add_trace(go.Scatter(
+        x=frontier["Volatility"] * 100, y=frontier["Return"] * 100,
+        mode="lines", name="Efficient Frontier",
+        line=dict(color=PRIMARY, width=3)
+    ))
+
+    # GMV point
+    if gmv_point:
+        fig.add_trace(go.Scatter(
+            x=[gmv_point[0] * 100], y=[gmv_point[1] * 100],
+            mode="markers+text", name="Global Min Variance",
+            text=["GMV"], textposition="top right",
+            marker=dict(size=12, color=ACCENT, symbol="diamond",
+                        line=dict(color="white", width=2))
+        ))
+
+    # Tangency
+    if tan_point:
+        fig.add_trace(go.Scatter(
+            x=[tan_point[0] * 100], y=[tan_point[1] * 100],
+            mode="markers+text", name="Tangency (Max Sharpe)",
+            text=["Tangency"], textposition="top right",
+            marker=dict(size=14, color=SUCCESS, symbol="star",
+                        line=dict(color="white", width=2))
+        ))
+
+    # CML
+    if cml_rf is not None and tan_point:
+        vol_range = np.linspace(0, tan_point[0] * 1.5, 50)
+        cml_rets = cml_rf + (tan_point[1] - cml_rf) / tan_point[0] * vol_range
+        fig.add_trace(go.Scatter(
+            x=vol_range * 100, y=cml_rets * 100,
+            mode="lines", name="Capital Market Line (CML)",
+            line=dict(color=WARNING, width=1.8, dash="dash")
+        ))
+
+    # Selected portfolio
+    if selected_point:
+        fig.add_trace(go.Scatter(
+            x=[selected_point[0] * 100], y=[selected_point[1] * 100],
+            mode="markers+text", name="Selected Portfolio",
+            text=["▶ Your Portfolio"], textposition="top left",
+            marker=dict(size=14, color=PRIMARY, symbol="circle",
+                        line=dict(color="white", width=2))
+        ))
+
+    fig.update_layout(
+        title="📉 Mean-Variance Efficient Frontier",
+        xaxis_title="Volatility (σ) %", yaxis_title="Expected Return (μ) %",
+        height=480, **PLOTLY_TEMPLATE
+    )
+    return fig
+
+def make_weights_chart(weights: pd.Series, title: str = "Portfolio Weights") -> go.Figure:
+    w = weights[weights > 0.001].sort_values(ascending=True)
+    fig = go.Figure(go.Bar(
+        x=w.values * 100, y=w.index,
+        orientation="h",
+        marker=dict(
+            color=w.values,
+            colorscale=[[0, "#FEE2E2"], [0.5, PRIMARY], [1, DARK]],
+            line=dict(color="white", width=1)
+        ),
+        text=[f"{v:.1f}%" for v in w.values * 100],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title=title, height=max(350, len(w) * 30 + 100),
+        xaxis_title="Weight (%)", **PLOTLY_TEMPLATE
+    )
+    return fig
+
+def make_correlation_heatmap(corr: pd.DataFrame) -> go.Figure:
+    labels = corr.columns.tolist()
+    fig = go.Figure(go.Heatmap(
+        z=corr.values, x=labels, y=labels,
+        colorscale="RdBu_r", zmid=0, zmin=-1, zmax=1,
+        text=np.round(corr.values, 2),
+        texttemplate="%{text}",
+        textfont=dict(size=9),
+        colorbar=dict(title="ρ"),
+    ))
+    fig.update_layout(
+        title="🔗 Correlation Matrix",
+        height=max(400, len(labels) * 35 + 120),
+        **PLOTLY_TEMPLATE
+    )
+    return fig
+
+def make_drawdown_chart(cum_series: pd.Series) -> go.Figure:
+    roll_max = cum_series.cummax()
+    dd = (cum_series / roll_max - 1) * 100
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=dd.index, y=dd.values,
+        fill="tozeroy", mode="lines",
+        name="Drawdown",
+        line=dict(color=PRIMARY, width=1.5),
+        fillcolor=f"rgba(200,16,46,0.15)"
+    ))
+    fig.update_layout(
+        title="📉 Drawdown History",
+        height=280, xaxis_title="Date", yaxis_title="Drawdown (%)",
+        **PLOTLY_TEMPLATE
+    )
+    return fig
+
+def make_rolling_sharpe(port_ret: pd.Series, rf_annual: float,
+                        window: int = 126) -> go.Figure:
+    rf_d = rf_annual / TRADING_DAYS
+    excess = port_ret - rf_d
+    roll_sr = excess.rolling(window).mean() / excess.rolling(window).std() * np.sqrt(TRADING_DAYS)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=roll_sr.index, y=roll_sr.values,
+        mode="lines", name=f"Rolling Sharpe ({window}d)",
+        line=dict(color=ACCENT, width=2)
+    ))
+    fig.add_hline(y=0, line_dash="dash", line_color="#94A3B8")
+    fig.add_hline(y=1, line_dash="dot", line_color=SUCCESS,
+                  annotation_text="Sharpe = 1")
+    fig.update_layout(
+        title=f"📊 Rolling Sharpe Ratio ({window} trading days)",
+        height=280, xaxis_title="Date", yaxis_title="Sharpe Ratio",
+        **PLOTLY_TEMPLATE
+    )
     return fig
 
 
 # ============================================================
-# PDF helpers
+# PDF REPORT BUILDER
 # ============================================================
-def _df_to_rl_table(df: pd.DataFrame, title: str, max_cols_per_block: int = 8):
-    """
-    Build one or multiple ReportLab tables to avoid width overflow.
-    Strategy:
-      - If too many columns, split columns into blocks and stack them vertically.
-      - Use small font + repeat header.
-    Returns list of Flowables.
-    """
+
+def _brand_color():
+    return colors.HexColor(PRIMARY)
+
+def _build_pdf_styles():
     styles = getSampleStyleSheet()
-    flow = [Paragraph(f"<b>{title}</b>", styles["Heading3"]), Spacer(1, 0.2 * cm)]
+    styles.add(ParagraphStyle(
+        name="ReportTitle",
+        fontSize=26, fontName="Helvetica-Bold",
+        textColor=colors.HexColor(DARK),
+        alignment=TA_CENTER, spaceAfter=6,
+    ))
+    styles.add(ParagraphStyle(
+        name="ReportSubtitle",
+        fontSize=12, fontName="Helvetica",
+        textColor=colors.HexColor("#64748B"),
+        alignment=TA_CENTER, spaceAfter=20,
+    ))
+    styles.add(ParagraphStyle(
+        name="SectionHeader",
+        fontSize=14, fontName="Helvetica-Bold",
+        textColor=colors.HexColor(DARK),
+        spaceBefore=16, spaceAfter=8,
+        borderPad=6,
+    ))
+    styles.add(ParagraphStyle(
+        name="SubHeader",
+        fontSize=11, fontName="Helvetica-Bold",
+        textColor=colors.HexColor(PRIMARY),
+        spaceBefore=10, spaceAfter=4,
+    ))
+    styles.add(ParagraphStyle(
+        name="BodyText2",
+        fontSize=9, fontName="Helvetica",
+        textColor=colors.HexColor("#374151"),
+        spaceAfter=3, leading=14,
+    ))
+    styles.add(ParagraphStyle(
+        name="FormulaText",
+        fontSize=9, fontName="Courier",
+        textColor=colors.HexColor(DARK),
+        backColor=colors.HexColor("#F1F5F9"),
+        borderPad=6, spaceAfter=6,
+    ))
+    return styles
 
-    df2 = df.copy()
-    df2 = df2.reset_index()
+def _rl_table_style(has_header: bool = True) -> TableStyle:
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0 if has_header else -1),
+         colors.HexColor(DARK) if has_header else colors.white),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white if has_header else colors.black),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor("#F8FAFC")]),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E2E8F0")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+    ]
+    return TableStyle(style)
 
-    # Split columns into blocks if needed
-    cols = df2.columns.tolist()
-    blocks = [cols[i:i + max_cols_per_block] for i in range(0, len(cols), max_cols_per_block)]
-
-    for bi, bcols in enumerate(blocks, start=1):
-        block_df = df2[bcols].copy()
-
-        # Convert to strings (prevents reportlab trying to interpret floats weirdly)
-        table_data = [bcols] + block_df.astype(object).fillna("").values.tolist()
-
-        t = RLTable(table_data, repeatRows=1)
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 8),
-            ("FONTSIZE", (0, 1), (-1, -1), 7),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-
-        if len(blocks) > 1:
-            flow.append(Paragraph(f"<i>Columns block {bi}/{len(blocks)}</i>", styles["Normal"]))
-            flow.append(Spacer(1, 0.15 * cm))
-
-        flow.append(t)
-        flow.append(Spacer(1, 0.4 * cm))
-
-    return flow
-
-
-def _matplotlib_save_equity_png(hist_idx, cum_hist, future_idx, V_med, V_p05, V_p95):
-    if not MATPLOTLIB_OK:
+def _fig_to_image_bytes(fig) -> BytesIO:
+    """Convert a plotly figure to PNG bytes for PDF embedding."""
+    try:
+        img_bytes = fig.to_image(format="png", width=800, height=400, scale=2)
+        return BytesIO(img_bytes)
+    except Exception:
         return None
 
-    fig = plt.figure(figsize=(10, 4))
-    plt.plot(hist_idx, cum_hist.values, label="Historical (cumulative)")
-    if future_idx is not None and V_med is not None:
-        plt.plot(future_idx, V_med[1:], label="Median projection")
-        plt.fill_between(future_idx, V_p05[1:], V_p95[1:], alpha=0.2, label="5%-95% band")
-    plt.legend()
-    plt.xlabel("Date")
-    plt.ylabel("Value (base 1)")
-    plt.tight_layout()
-
+def _mpl_fig_to_bytes(fig) -> BytesIO:
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=160)
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
+                facecolor="white")
     plt.close(fig)
     buf.seek(0)
     return buf
 
-
-def _matplotlib_save_corr_png(corr: pd.DataFrame, title: str):
-    if not MATPLOTLIB_OK:
-        return None
-
-    fig = plt.figure(figsize=(10, 5))
-    ax = plt.gca()
-    im = ax.imshow(corr.values, vmin=-1, vmax=1, cmap="Blues")
-    ax.set_xticks(range(len(corr.columns)))
-    ax.set_yticks(range(len(corr.index)))
-    ax.set_xticklabels(corr.columns, rotation=45, ha="right")
-    ax.set_yticklabels(corr.index)
-    ax.set_title(title)
-
-    # Annotate coefficients in each cell
-    for i in range(corr.shape[0]):
-        for j in range(corr.shape[1]):
-            ax.text(j, i, f"{corr.values[i, j]:.2f}", ha="center", va="center", fontsize=7, color="black")
-
-    fig.colorbar(im, fraction=0.02, pad=0.02)
-    plt.tight_layout()
-
+def build_pdf_report(
+    report_params: dict,
+    weights: pd.Series,
+    metrics_df: pd.DataFrame,
+    method_name: str,
+    equity_fig=None,
+    frontier_fig=None,
+    weights_fig=None,
+    corr_fig=None,
+    dd_fig=None,
+    rolling_sr_fig=None,
+    ff_results: dict = None,
+    show_calcs: bool = False,
+    calc_steps: dict = None,
+) -> bytes:
+    """Generate a professional PDF report."""
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=160)
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-
-
-def build_pdf_summary(title: str, params: dict, weights_opt: pd.Series, weights_final: pd.Series,
-                      metrics_perf: pd.DataFrame, metrics_risk: pd.DataFrame) -> bytes:
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=24, leftMargin=24, topMargin=24, bottomMargin=24)
-    styles = getSampleStyleSheet()
-
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=2 * cm, rightMargin=2 * cm,
+        topMargin=2 * cm, bottomMargin=2 * cm,
+    )
+    styles = _build_pdf_styles()
     story = []
-    story.append(Paragraph(f"<b>{title}</b>", styles["Title"]))
+
+    # ── Cover page ─────────────────────────────────────────
+    story.append(Spacer(1, 1.5 * cm))
+    story.append(Paragraph("PORTFOLIO MANAGEMENT", styles["ReportTitle"]))
+    story.append(Paragraph("Advanced Portfolio Analysis Report", styles["ReportSubtitle"]))
+    story.append(HRFlowable(width="100%", thickness=2, color=_brand_color()))
     story.append(Spacer(1, 0.4 * cm))
 
-    story.append(Paragraph("<b>Parameters</b>", styles["Heading2"]))
-    p_lines = "<br/>".join([f"{k}: {v}" for k, v in params.items()])
-    story.append(Paragraph(p_lines, styles["Normal"]))
+    info_data = [
+        ["Field", "Value"],
+        ["Optimization Method", method_name],
+        ["Period", f"{report_params.get('start', '')} → {report_params.get('end', '')}"],
+        ["Benchmark", report_params.get("benchmark", "SPY")],
+        ["Risk-Free Rate", f"{report_params.get('rf', 0):.2%}"],
+        ["Number of Assets", str(report_params.get("n_assets", ""))],
+        ["Date Generated", str(date.today())],
+        ["ESSCA — Prof. Olga Tatarnikova", "Portfolio Management Course"],
+    ]
+    t = RLTable(info_data, colWidths=[7 * cm, 10 * cm])
+    t.setStyle(_rl_table_style())
+    story.append(t)
+    story.append(PageBreak())
+
+    # ── Step 1: Planning ────────────────────────────────────
+    story.append(Paragraph("STEP 1 — PLANNING", styles["SectionHeader"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=_brand_color()))
     story.append(Spacer(1, 0.3 * cm))
 
-    # Weights (opt + final)
-    w_df = pd.DataFrame({
-        "Weight_OPT": weights_opt.reindex(weights_final.index).fillna(0.0),
-        "Weight_FINAL": weights_final,
-    }).reset_index().rename(columns={"index": "Ticker"})
-    story += _df_to_rl_table(w_df, "Portfolio weights (optimal vs final)", max_cols_per_block=6)
-
-    story.append(Spacer(1, 0.2 * cm))
-    story += _df_to_rl_table(metrics_perf, "Performance metrics", max_cols_per_block=6)
-    story += _df_to_rl_table(metrics_risk, "Risk metrics", max_cols_per_block=6)
-
-    doc.build(story)
-    pdf = buf.getvalue()
-    buf.close()
-    return pdf
-
-
-def build_pdf_full_report(title: str, params: dict,
-                          weights_opt: pd.Series, weights_final: pd.Series,
-                          equity_png: BytesIO | None,
-                          corr_png: BytesIO | None,
-                          metrics_perf: pd.DataFrame, metrics_risk: pd.DataFrame,
-                          details_table: pd.DataFrame) -> bytes:
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=18, bottomMargin=18)
-    styles = getSampleStyleSheet()
-
-    story = []
-    story.append(Paragraph(f"<b>{title}</b>", styles["Title"]))
+    story.append(Paragraph("Investment Objectives & Capital Market Expectations",
+                            styles["SubHeader"]))
+    story.append(Paragraph(
+        "This portfolio is constructed following a rigorous asset allocation framework aligned "
+        "with Modern Portfolio Theory (Markowitz, 1952). The investment universe spans global "
+        "equities selected across multiple geographic regions. The optimization methodology "
+        f"applied is <b>{method_name}</b>, targeting an efficient risk-return trade-off relative "
+        "to the benchmark.",
+        styles["BodyText2"]
+    ))
     story.append(Spacer(1, 0.3 * cm))
 
-    story.append(Paragraph("<b>Parameters</b>", styles["Heading2"]))
-    p_lines = "<br/>".join([f"{k}: {v}" for k, v in params.items()])
-    story.append(Paragraph(p_lines, styles["Normal"]))
+    params_data = [["Parameter", "Value"]] + [
+        [k, str(v)] for k, v in report_params.items()
+    ]
+    t2 = RLTable(params_data, colWidths=[8 * cm, 9 * cm])
+    t2.setStyle(_rl_table_style())
+    story.append(t2)
+    story.append(PageBreak())
+
+    # ── Step 2: Execution ───────────────────────────────────
+    story.append(Paragraph("STEP 2 — EXECUTION: PORTFOLIO CONSTRUCTION",
+                            styles["SectionHeader"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=_brand_color()))
     story.append(Spacer(1, 0.3 * cm))
 
-    # Equity curve image
-    story.append(Paragraph("<b>Equity curve (historical + projection)</b>", styles["Heading2"]))
-    story.append(Spacer(1, 0.2 * cm))
-    if equity_png is not None:
-        img = RLImage(equity_png, width=24 * cm, height=8.5 * cm)
-        story.append(img)
-    else:
-        story.append(Paragraph("Equity curve image unavailable (matplotlib not installed).", styles["Normal"]))
+    story.append(Paragraph(f"Optimization Method: {method_name}", styles["SubHeader"]))
+
+    method_desc = {
+        "Markowitz MVO (Max Sharpe)": "Mean-Variance Optimization maximizes the Sharpe ratio by finding the tangency portfolio on the efficient frontier. Formula: max w'μ/√(w'Σw) subject to Σwᵢ=1, wᵢ≥0.",
+        "Markowitz MVO (Min Variance)": "Global Minimum Variance portfolio minimizes total portfolio variance. Formula: min w'Σw subject to Σwᵢ=1, wᵢ≥0.",
+        "Elton-Gruber (Tangency)": "Elton & Gruber (1977) simplified the Markowitz framework by computing z = Σ⁻¹(μ - Rf), then normalizing: w = z / Σzᵢ. This yields the tangency portfolio directly without quadratic programming.",
+        "Merton Two-Fund": "Merton's separation theorem: any efficient portfolio is a linear combination of the GMV and Tangency portfolios. w = α·w_tan + (1-α)·w_gmv, where α is calibrated to the target return.",
+        "Black-Litterman": "Black-Litterman blends CAPM equilibrium returns (Π) with investor views (Q, P) via Bayesian updating: μ_BL = [(τΣ)⁻¹ + P'Ω⁻¹P]⁻¹ [(τΣ)⁻¹Π + P'Ω⁻¹Q].",
+        "Equal Weight": "Naive diversification: wᵢ = 1/N for all assets. Benchmark strategy.",
+        "Momentum": "Smart-beta: overweights past winners (top quartile by 6-month return), underweights past losers.",
+        "Low Volatility": "Smart-beta: weights inversely proportional to historical volatility — wᵢ ∝ 1/σᵢ.",
+    }
+    desc = method_desc.get(method_name, "See application for methodology details.")
+    story.append(Paragraph(desc, styles["BodyText2"]))
+    story.append(Spacer(1, 0.3 * cm))
+
+    # Weights table
+    story.append(Paragraph("Final Portfolio Weights", styles["SubHeader"]))
+    w_show = weights[weights > 0.001].sort_values(ascending=False)
+    w_data = [["Ticker", "Weight (%)", "Rank"]]
+    for i, (t, v) in enumerate(w_show.items(), 1):
+        w_data.append([str(t), f"{v:.2%}", str(i)])
+    wt = RLTable(w_data, colWidths=[5 * cm, 5 * cm, 5 * cm])
+    wt.setStyle(_rl_table_style())
+    story.append(wt)
+
+    # Embed charts
+    def _add_fig(fig, caption: str, width_cm=16):
+        if fig is None:
+            return
+        try:
+            img_b = _fig_to_image_bytes(fig)
+            if img_b:
+                story.append(Spacer(1, 0.3 * cm))
+                story.append(RLImage(img_b, width=width_cm * cm,
+                                     height=width_cm * 0.5 * cm))
+                story.append(Paragraph(f"<i>{caption}</i>",
+                                        ParagraphStyle("cap", fontSize=8,
+                                                        textColor=colors.grey,
+                                                        alignment=TA_CENTER)))
+                story.append(Spacer(1, 0.2 * cm))
+        except Exception:
+            pass
+
     story.append(Spacer(1, 0.4 * cm))
-
-    # Correlation image
-    story.append(Paragraph("<b>Correlation matrix (historical)</b>", styles["Heading2"]))
-    story.append(Spacer(1, 0.2 * cm))
-    if corr_png is not None:
-        img = RLImage(corr_png, width=24 * cm, height=9.0 * cm)
-        story.append(img)
-    else:
-        story.append(Paragraph("Correlation matrix image unavailable (matplotlib not installed).", styles["Normal"]))
+    _add_fig(weights_fig, "Figure 1: Portfolio Weights Allocation")
     story.append(PageBreak())
 
-    # Metrics
-    story.append(Paragraph("<b>Performance & Risk metrics</b>", styles["Heading2"]))
-    story.append(Spacer(1, 0.2 * cm))
-    story += _df_to_rl_table(metrics_perf, "Performance metrics", max_cols_per_block=7)
-    story += _df_to_rl_table(metrics_risk, "Risk metrics", max_cols_per_block=7)
-
+    _add_fig(frontier_fig, "Figure 2: Mean-Variance Efficient Frontier with GMV, Tangency & CML")
+    _add_fig(corr_fig, "Figure 3: Asset Correlation Matrix")
     story.append(PageBreak())
 
-    # Portfolio details — IMPORTANT: avoid truncation by splitting columns into blocks and stacking
-    story.append(Paragraph("<b>Portfolio details (table)</b>", styles["Heading2"]))
+    # Show intermediate calculations if requested
+    if show_calcs and calc_steps:
+        story.append(Paragraph("Intermediate Calculations (Professor Review)",
+                                styles["SubHeader"]))
+        story.append(Paragraph(
+            "The following shows the step-by-step calculations used in the optimization process.",
+            styles["BodyText2"]
+        ))
+        for step_name, step_val in calc_steps.items():
+            story.append(Paragraph(f"• {step_name}:", styles["BodyText2"]))
+            if isinstance(step_val, np.ndarray):
+                if step_val.ndim == 1:
+                    vals = ", ".join([f"{x:.4f}" for x in step_val[:10]])
+                    story.append(Paragraph(f"  [{vals}{'...' if len(step_val)>10 else ''}]",
+                                           styles["FormulaText"]))
+                else:
+                    story.append(Paragraph(
+                        f"  Matrix {step_val.shape} — see application for full display",
+                        styles["FormulaText"]
+                    ))
+            elif isinstance(step_val, float):
+                story.append(Paragraph(f"  {step_val:.6f}", styles["FormulaText"]))
+            else:
+                story.append(Paragraph(f"  {str(step_val)[:200]}", styles["FormulaText"]))
+        story.append(PageBreak())
+
+    # ── Step 3: Feedback ─────────────────────────────────────
+    story.append(Paragraph("STEP 3 — FEEDBACK: PERFORMANCE EVALUATION",
+                            styles["SectionHeader"]))
+    story.append(HRFlowable(width="100%", thickness=1, color=_brand_color()))
+    story.append(Spacer(1, 0.3 * cm))
+
+    story.append(Paragraph("Key Performance & Risk Metrics", styles["SubHeader"]))
+    story.append(Paragraph(
+        "Performance is evaluated using the full set of course metrics (S9 — Performance Evaluation). "
+        "All ratios are annualised unless stated otherwise.",
+        styles["BodyText2"]
+    ))
     story.append(Spacer(1, 0.2 * cm))
-    story += _df_to_rl_table(details_table, "Portfolio details", max_cols_per_block=7)
+
+    if not metrics_df.empty:
+        m_data = [["Metric", "Value"]] + metrics_df.values.tolist()
+        mt = RLTable(m_data, colWidths=[10 * cm, 7 * cm])
+        mt.setStyle(_rl_table_style())
+        story.append(mt)
+
+    story.append(Spacer(1, 0.4 * cm))
+    _add_fig(equity_fig, "Figure 4: Portfolio vs Benchmark Equity Curve (base 100)")
+    _add_fig(dd_fig, "Figure 5: Historical Drawdown")
+    _add_fig(rolling_sr_fig, "Figure 6: Rolling Sharpe Ratio (126-day window)")
+
+    # Fama-French results
+    if ff_results:
+        story.append(PageBreak())
+        story.append(Paragraph("Fama-French 3-Factor Regression", styles["SubHeader"]))
+        story.append(Paragraph(
+            "The portfolio's returns are regressed on the three Fama-French factors: "
+            "MktRF (market excess return), SMB (Small minus Big), HML (High minus Low B/M). "
+            "This decomposes alpha from systematic factor exposures.",
+            styles["BodyText2"]
+        ))
+        ff_data = [["Parameter", "Value"]] + [
+            [k, f"{v:.4f}" if isinstance(v, float) else str(v)]
+            for k, v in ff_results.items()
+        ]
+        fft = RLTable(ff_data, colWidths=[8 * cm, 9 * cm])
+        fft.setStyle(_rl_table_style())
+        story.append(fft)
+
+    # Footer
+    story.append(Spacer(1, 1 * cm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#E2E8F0")))
+    story.append(Paragraph(
+        f"<i>Generated by Portfolio Management Pro · ESSCA · Prof. Olga Tatarnikova · {date.today()}</i>",
+        ParagraphStyle("footer", fontSize=7, textColor=colors.grey, alignment=TA_CENTER)
+    ))
 
     doc.build(story)
-    pdf = buf.getvalue()
-    buf.close()
-    return pdf
+    return buf.getvalue()
 
 
 # ============================================================
-# UI — Sidebar
+# KPI CARD RENDERER
 # ============================================================
-st.title("Portfolio Optimizer Pro (S&P 500/400/600 + Custom)")
+def kpi_card(label, value, color_class=""):
+    st.markdown(
+        f"""<div class="kpi-card">
+              <div class="kpi-label">{label}</div>
+              <div class="kpi-value {color_class}">{value}</div>
+           </div>""",
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
 
 with st.sidebar:
-    st.header("Parameters")
+    st.markdown(
+        f"""<div style="text-align:center;padding:1rem 0 0.5rem;">
+              <span style="font-size:2rem;">📊</span>
+              <div style="font-size:1.1rem;font-weight:700;color:white;margin-top:0.3rem;">
+                Portfolio Management Pro</div>
+              <div style="font-size:0.75rem;color:#94A3B8;">ESSCA · Prof. Tatarnikova</div>
+           </div>""",
+        unsafe_allow_html=True,
+    )
+    st.markdown("---")
 
-    years_hist = st.slider("History (years)", 2, 10, 5)
-    target_n = st.slider("Number of assets (Top N)", 5, 20, 10)
-    iters = st.slider("Optimization iterations", 5000, 60000, 25000, step=5000)
-
-    st.divider()
-    st.subheader("Universe")
-    universe_choice = st.multiselect(
-        "Select indexes",
-        ["S&P 500 (Large)", "S&P 400 (Mid)", "S&P 600 (Small)"],
-        default=["S&P 500 (Large)"]
+    # ── Geographic Universe ─────────────────────────────────
+    st.markdown("### 🌍 Asset Universe")
+    region_choices = st.multiselect(
+        "Select Regions",
+        options=ALL_REGIONS,
+        default=["Americas", "France", "Germany"],
+        help="Select one or more regions. Selecting all gives global equity coverage."
     )
 
-    st.subheader("Portfolio mode")
-    mode = st.radio("Choose mode", ["Optimization (S&P)", "Custom portfolio"], index=0)
+    # Show available tickers count
+    candidate_tickers = get_tickers_for_regions(region_choices)
+    st.caption(f"📦 {len(candidate_tickers)} tickers available in selected regions")
 
-    custom_tickers_input = ""
-    if mode == "Custom portfolio":
-        custom_tickers_input = st.text_area(
-            "Custom tickers (comma-separated, e.g., AAPL, MSFT, AMZN)",
-            value="AAPL, MSFT, GOOGL, AMZN, MCD, UNH, JNJ, JPM, XOM, KO"
-        )
+    # Let user further refine
+    max_assets = st.slider("Max assets to include", 5, 30, 15,
+                           help="App selects the most liquid from available tickers")
 
-    st.divider()
-    st.subheader("Horizon & Objective")
-    years_fwd = st.slider("Projection horizon (years)", 1, 5, 2)
-    candidates_n = st.slider("Candidate pre-selection (scalable)", 30, 200, 80, step=10)
+    st.markdown("---")
+    # ── Period ──────────────────────────────────────────────
+    st.markdown("### 📅 Analysis Period")
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("From", value=date(2019, 1, 1),
+                                   max_value=date.today() - timedelta(days=365))
+    with col2:
+        end_date = st.date_input("To", value=date.today(),
+                                 min_value=start_date + timedelta(days=365))
 
-    objective = st.selectbox(
-        "Objective",
-        ["Risk-Adjusted Return", "Maximum Expected Return (Horizon-Based)", "Compounded Growth Optimization","Maximum Sharpe Ratio (Aggressive)"]
-    )
-    risk_lambda = st.slider("λ (risk aversion / CVaR)", 0.0, 5.0, 1.0, 0.1)
-
-    st.divider()
-    st.subheader("Scenario (macro)")
-    scenario = st.selectbox("Macro scenario", ["Base", "Stress (rates+inflation)", "Risk-on (rates down)"])
-
-    SCENARIOS = {
-        "Base": {"rf": 0.018, "erp": 0.048, "vol_mult": 0.68, "corr_shrink": 0.20},
-        "Stress (rates+inflation)": {"rf": 0.045, "erp": 0.065, "vol_mult": 1.35, "corr_shrink": 0.35},
-        "Risk-on (rates down)": {"rf": 0.02, "erp": 0.040, "vol_mult": 0.85, "corr_shrink": 0.10},
+    st.markdown("---")
+    # ── Benchmark ───────────────────────────────────────────
+    st.markdown("### 🎯 Benchmark")
+    BENCHMARKS = {
+        "S&P 500 (SPY)": "SPY",
+        "MSCI World (URTH)": "URTH",
+        "EURO STOXX 50 (FEZ)": "FEZ",
+        "CAC 40 (EWQ)": "EWQ",
+        "DAX (EWG)": "EWG",
+        "FTSE 100 (EWU)": "EWU",
+        "MSCI EM (EEM)": "EEM",
     }
-    scen = SCENARIOS[scenario]
+    bench_label = st.selectbox("Benchmark", list(BENCHMARKS.keys()))
+    bench_ticker = BENCHMARKS[bench_label]
 
-    rf_scen = st.slider("Scenario risk-free (rf)", 0.00, 0.10, float(scen["rf"]), 0.005)
-    erp_scen = st.slider("Scenario equity risk premium (ERP)", 0.00, 0.10, float(scen["erp"]), 0.005)
-    vol_mult = st.slider("Volatility multiplier", 0.50, 2.00, float(scen["vol_mult"]), 0.05)
-    corr_shrink = st.slider("Correlation stress (shrink → 1)", 0.00, 0.70, float(scen["corr_shrink"]), 0.05)
+    st.markdown("---")
+    # ── Market Assumptions ──────────────────────────────────
+    st.markdown("### 📐 Market Assumptions")
+    rf_rate = st.slider("Risk-Free Rate (annual %)", 0.0, 8.0, 4.0, 0.25) / 100.0
+    erp = st.slider("Equity Risk Premium (annual %)", 2.0, 10.0, 5.0, 0.25) / 100.0
 
-    k_alpha = st.slider("Factor alpha scale (k)", 0.00, 0.08, 0.03, 0.005)
-    lambda_val = st.slider("Valuation mean reversion (lambda)", 0.00, 0.50, 0.20, 0.05)
+    st.markdown("---")
+    # ── Optimization Method ─────────────────────────────────
+    st.markdown("### ⚙️ Optimization Method")
+    OPT_METHODS = [
+        "Markowitz MVO (Max Sharpe)",
+        "Markowitz MVO (Min Variance)",
+        "Elton-Gruber (Tangency)",
+        "Merton Two-Fund",
+        "Black-Litterman",
+        "Equal Weight",
+        "Momentum",
+        "Low Volatility",
+    ]
+    method = st.selectbox("Method", OPT_METHODS)
 
-    st.divider()
-    st.subheader("Monte Carlo")
-    n_sims = st.slider("Simulations", 1000, 20000, 5000, step=1000)
+    # Black-Litterman views
+    bl_views = []
+    if method == "Black-Litterman":
+        st.markdown("**Investor Views (Black-Litterman)**")
+        n_views = st.number_input("Number of views", 0, 5, 1, key="n_views")
+        bl_views = []
+        for i in range(int(n_views)):
+            with st.expander(f"View {i+1}", expanded=True):
+                view_type = st.selectbox(f"Type", ["Absolute", "Relative"],
+                                         key=f"vt_{i}")
+                ticker1 = st.text_input(f"Asset (or Asset A)", key=f"t1_{i}", value="AAPL")
+                if view_type == "Relative":
+                    ticker2 = st.text_input("Asset B", key=f"t2_{i}", value="MSFT")
+                else:
+                    ticker2 = None
+                view_ret = st.number_input(f"Expected return (%)", -20.0, 50.0, 5.0,
+                                           key=f"vr_{i}") / 100.0
+                view_conf = st.slider(f"Confidence (%)", 10, 90, 50,
+                                      key=f"vc_{i}") / 100.0
+                bl_views.append((view_type, ticker1, ticker2, view_ret, view_conf))
 
-    st.divider()
-    st.subheader("Weight adjustment")
-    w_step = st.number_input("Step per click (+/-)", min_value=0.001, max_value=0.20, value=0.03, step=0.01, format="%.3f")
+    # Merton target return
+    merton_target = 0.10
+    if method == "Merton Two-Fund":
+        merton_target = st.slider("Target Annual Return (%)", 1.0, 30.0, 10.0, 0.5) / 100.0
 
-    # --- run control (prevents full recompute on every +/- click)
-    def _trigger_run():
-        st.session_state["do_run"] = True
+    st.markdown("---")
+    # ── Report options ──────────────────────────────────────
+    st.markdown("### 📄 Report Options")
+    show_calcs = st.toggle("Show intermediate calculations", value=True,
+                           help="Enable for professor review of calculation steps")
 
-    st.button("🚀 Run calculation", type="primary", on_click=_trigger_run)
-    st.caption("First run can be slow (prices + fundamentals).")
-
-
-st.info("Pick a horizon + macro scenario. The model selects assets and weights for that horizon. You can then adjust weights (+/-) with equal redistribution.")
+    st.markdown("---")
+    run = st.button("🚀 Run Analysis", use_container_width=True,
+                    type="primary")
 
 
 # ============================================================
-# Compute ONLY when explicitly requested
+# MAIN CONTENT
 # ============================================================
-do_run = bool(st.session_state.get("do_run", False))
 
-# Stored results (to keep UI reactive without recompute)
-RESULT_KEYS = [
-    "prices", "returns10", "top", "w_opt", "w_final",
-    "fund10", "table_details",
-    "cum_hist", "port_ret_hist",
-    "V_med", "V_p05", "V_p95", "future_idx",
-    "corr_hist",
-    "bench_cum", "bench_ret",
-    "metrics_perf", "metrics_risk",
-    "pdf_summary_bytes", "pdf_full_bytes"
-]
+st.markdown(
+    """<div class="pm-header">
+         <h1>📊 Portfolio Management Pro</h1>
+         <p>Advanced Portfolio Construction & Performance Analysis · ESSCA · Prof. Olga Tatarnikova</p>
+       </div>""",
+    unsafe_allow_html=True,
+)
 
-if do_run:
-    status = st.status("Starting…", expanded=True)
+# ── Tabs ────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🗺️ Planning",
+    "⚙️ Optimization",
+    "📈 Performance",
+    "🔬 Factor Models",
+    "📄 Report",
+])
 
-    try:
-        # 1/7 — Build universe
-        status.write("1/7 — Building universe / portfolio list")
-        universe = []
+# ── State ───────────────────────────────────────────────────
+if "results" not in st.session_state:
+    st.session_state["results"] = None
 
-        if mode == "Optimization (S&P)":
-            if "S&P 500 (Large)" in universe_choice:
-                t, _ = get_sp500_tickers()
-                universe += t
-            if "S&P 400 (Mid)" in universe_choice:
-                try:
-                    t, _ = get_sp400_tickers()
-                    universe += t
-                except Exception as e:
-                    st.warning(f"S&P 400 unavailable: {e}")
-            if "S&P 600 (Small)" in universe_choice:
-                try:
-                    t, _ = get_sp600_tickers()
-                    universe += t
-                except Exception as e:
-                    st.warning(f"S&P 600 unavailable: {e}")
+# ============================================================
+# RUN ANALYSIS
+# ============================================================
+if run:
+    if not region_choices:
+        st.error("Please select at least one region.")
+        st.stop()
 
-            universe = sorted(set(universe))
-            if len(universe) < 10:
-                raise RuntimeError("Universe too small; select at least one index with enough constituents.")
+    with st.spinner("⏳ Fetching market data…"):
+        all_tickers = get_tickers_for_regions(region_choices)
+        # Limit to manageable set
+        tickers_to_try = all_tickers[:min(len(all_tickers), max_assets * 3)]
+        prices = fetch_prices(
+            tuple(tickers_to_try),
+            str(start_date), str(end_date)
+        )
+        if prices.empty:
+            st.error("No data returned. Try different tickers or date range.")
+            st.stop()
 
+        # Keep most liquid (fewest NaN)
+        prices = prices.dropna(axis=1, thresh=int(0.85 * len(prices)))
+        prices = prices.iloc[:, :max_assets]  # cap at max_assets
+        tickers = prices.columns.tolist()
+
+        # Benchmark
+        bench_prices = fetch_prices(
+            (bench_ticker,), str(start_date), str(end_date)
+        )
+
+    with st.spinner("⏳ Computing returns & statistics…"):
+        rets = compute_returns(prices)
+        mu_ann = annualize_returns(rets).values
+        sigma_ann = cov_matrix(rets).values
+        sigma_daily = rets.cov().values
+        n = len(tickers)
+
+        if bench_prices.empty:
+            bench_ret = rets.iloc[:, 0]
         else:
-            # Custom portfolio tickers
-            raw = (custom_tickers_input or "").strip()
-            if len(raw) == 0:
-                raise RuntimeError("Please provide custom tickers.")
-            universe = [x.strip().upper().replace(".", "-") for x in raw.split(",") if x.strip()]
-            universe = sorted(set(universe))
-            if len(universe) < 2:
-                raise RuntimeError("Please provide at least 2 tickers for a portfolio.")
+            bench_ret = compute_returns(bench_prices).iloc[:, 0]
+            bench_ret = bench_ret.reindex(rets.index).fillna(0)
 
-        status.write(f"✔ Universe size: {len(universe)}")
+    with st.spinner(f"⏳ Running {method} optimization…"):
+        calc_steps = {}
+        weights = None
 
-        # 2/7 — Prices
-        status.write("2/7 — Downloading prices (EOD)")
-        prices_all = fetch_prices(universe, years=years_hist)
+        if method == "Markowitz MVO (Max Sharpe)":
+            w_tan = tangency_portfolio(mu_ann, sigma_ann, rf_rate)
+            weights = pd.Series(w_tan, index=tickers)
+            calc_steps = {
+                "Expected Annual Returns (μ)": mu_ann,
+                "Risk-Free Rate (Rf)": rf_rate,
+                "Excess Returns (μ - Rf)": mu_ann - rf_rate,
+                "Tangency weights (unnormalized)": np.linalg.pinv(sigma_ann) @ (mu_ann - rf_rate),
+                "Final Tangency weights": w_tan,
+            }
 
-        # Benchmark: use SPY as S&P500 proxy (more reliable than ^SPX on yfinance)
-        bench_px = fetch_prices(["SPY"], years=years_hist)
-        bench_px.columns = ["SPY"]
+        elif method == "Markowitz MVO (Min Variance)":
+            w_gmv = gmv_portfolio(sigma_ann)
+            weights = pd.Series(w_gmv, index=tickers)
+            calc_steps = {
+                "Covariance Matrix Σ": sigma_ann,
+                "Σ⁻¹ · 1 (unnormalized)": np.linalg.pinv(sigma_ann) @ np.ones(n),
+                "GMV weights": w_gmv,
+            }
 
-        status.write(f"✔ Prices loaded: {prices_all.shape[1]} tickers, {prices_all.shape[0]} dates")
+        elif method == "Elton-Gruber (Tangency)":
+            w_eg, eg_steps = elton_gruber_tangency(mu_ann, sigma_ann, rf_rate)
+            weights = pd.Series(w_eg, index=tickers)
+            calc_steps = {k: v for k, v in eg_steps.items()}
 
-        # 3/7 — Filter minimal history
-        status.write("3/7 — Cleaning (minimum history)")
-        min_obs = int(0.80 * len(prices_all))
-        valid_cols = [c for c in prices_all.columns if prices_all[c].count() >= min_obs]
-        prices = prices_all[valid_cols].copy()
+        elif method == "Merton Two-Fund":
+            w_m, m_steps = merton_two_fund(mu_ann, sigma_ann, rf_rate, merton_target)
+            weights = pd.Series(w_m, index=tickers)
+            calc_steps = {k: v for k, v in m_steps.items()}
 
-        # Keep benchmark aligned
-        common_idx = prices.index.intersection(bench_px.index)
-        prices = prices.loc[common_idx]
-        bench_px = bench_px.loc[common_idx]
+        elif method == "Black-Litterman":
+            # Build equilibrium returns from CAPM
+            mkt_var = float(bench_ret.var() * TRADING_DAYS)
+            delta = (erp) / mkt_var  # risk aversion
+            mu_eq = delta * sigma_ann @ np.ones(n)
+            mu_eq = mu_eq / mu_eq.sum() * (rf_rate + erp)
 
-        bench_rets = bench_px["SPY"].pct_change().dropna()
+            # Parse views
+            P_rows, Q_vals, omega_vals = [], [], []
+            for vtype, t1, t2, vret, vconf in bl_views:
+                if t1 not in tickers:
+                    continue
+                row = np.zeros(n)
+                idx1 = tickers.index(t1)
+                row[idx1] = 1.0
+                if vtype == "Relative" and t2 and t2 in tickers:
+                    idx2 = tickers.index(t2)
+                    row[idx2] = -1.0
+                P_rows.append(row)
+                Q_vals.append(vret)
+                variance = ((1 - vconf) / vconf) * float(
+                    np.sqrt(row @ sigma_ann @ row))
+                omega_vals.append(max(variance ** 2, 1e-6))
 
-        status.write(f"✔ After filter: {prices.shape[1]} tickers")
-        if prices.shape[1] < 2:
-            raise RuntimeError("After filtering, fewer than 2 tickers remain with usable data.")
+            if len(P_rows) == 0:
+                P_rows = [np.eye(n)[0]]
+                Q_vals = [mu_eq[0]]
+                omega_vals = [1e-4]
 
-        # 4/7 — Pre-selection score (only in Optimization mode)
-        status.write("4/7 — Fast scoring (candidate pre-selection)")
+            P = np.array(P_rows)
+            Q = np.array(Q_vals)
+            omega_diag = np.array(omega_vals)
 
-        returns_all, mu_daily_all, _ = compute_returns(prices)
+            w_bl, mu_bl, sigma_bl, bl_steps = black_litterman(
+                mu_eq, sigma_ann, P, Q, omega_diag, tau=0.025
+            )
+            weights = pd.Series(w_bl, index=tickers)
+            calc_steps = {"Equilibrium returns (Π)": mu_eq,
+                          "BL Posterior mean (μ_BL)": mu_bl,
+                          "Optimal BL weights": w_bl}
 
-        mu_annual_all = (1 + mu_daily_all) ** TRADING_DAYS - 1
-        vol_annual_all = returns_all.std() * np.sqrt(TRADING_DAYS)
-        sharpe_like = (mu_annual_all - rf_scen) / (vol_annual_all + 1e-12)
+        elif method == "Equal Weight":
+            weights = equal_weight(tickers)
 
-        lookback = min(TRADING_DAYS, len(prices) - 1)
-        mom_1y = prices.iloc[-1] / prices.iloc[-lookback] - 1
+        elif method == "Momentum":
+            weights = momentum_weight(rets)
 
-        score_fast = (0.50 * zscore(sharpe_like) + 0.50 * zscore(mom_1y)).replace([np.inf, -np.inf], np.nan)
-        score_fast = score_fast.fillna(score_fast.median())
+        elif method == "Low Volatility":
+            weights = low_volatility_weight(rets)
 
-        if mode == "Custom portfolio":
-            candidates = prices.columns.tolist()
-        else:
-            ranked = score_fast.sort_values(ascending=False)
-            candidates = ranked.head(int(min(candidates_n, len(ranked)))).index.tolist()
+        if weights is None:
+            weights = equal_weight(tickers)
 
-        status.write(f"✔ Candidates: {len(candidates)}")
+        # Normalize
+        weights = weights.clip(lower=0)
+        weights = weights / weights.sum()
 
-        # 5/7 — Scenario + Monte Carlo on candidates
-        status.write("5/7 — Scenario estimation + Monte Carlo (candidates)")
-        pricesC = prices[candidates]
-        returnsC, _, _ = compute_returns(pricesC)
-        fundC = fetch_fundamentals_yf(candidates)
+    with st.spinner("⏳ Computing efficient frontier…"):
+        frontier_df = efficient_frontier_points(mu_ann, sigma_ann, rf_rate, n_points=60)
 
-        mu_smart_C = compute_smart_mu(
-            fund=fundC,
-            score=score_fast.reindex(candidates),
-            rf=rf_scen,
-            erp=erp_scen,
-            k_alpha=k_alpha,
-            lambda_val=lambda_val
-        )
+    with st.spinner("⏳ Computing performance metrics…"):
+        port_ret = portfolio_returns(rets, weights)
+        cum_port = (1 + port_ret).cumprod()
+        cum_bench = (1 + bench_ret.reindex(port_ret.index).fillna(0)).cumprod()
+        metrics_df = compute_all_metrics(port_ret, bench_ret.reindex(port_ret.index).fillna(0), rf_rate)
 
-        sigmaC, corrC = compute_sigma_and_corr(returnsC, vol_mult=vol_mult, corr_shrink=corr_shrink)
-        S0C = pricesC.iloc[-1].astype(float)
+        # Frontier key points
+        w_gmv_arr = gmv_portfolio(sigma_ann)
+        w_tan_arr = tangency_portfolio(mu_ann, sigma_ann, rf_rate)
+        gmv_ret, gmv_vol, _ = portfolio_stats(w_gmv_arr, mu_ann, sigma_ann)
+        tan_ret, tan_vol, _ = portfolio_stats(w_tan_arr, mu_ann, sigma_ann)
+        sel_ret, sel_vol, _ = portfolio_stats(weights.values, mu_ann, sigma_ann)
 
-        ST, tickersC = mc_terminal_gbm_corr(
-            S0=S0C.reindex(candidates),
-            mu=mu_smart_C.reindex(candidates),
-            sigma=sigmaC,
-            corr=corrC,
-            years=float(years_fwd),
-            n_sims=int(n_sims),
-            seed=42
-        )
+    with st.spinner("⏳ Fetching Fama-French factors…"):
+        ff_data = fetch_ff3_factors(str(start_date), str(end_date))
+        ff_results = {}
+        if not ff_data.empty:
+            ff_results = fama_french_regression(port_ret, ff_data)
 
-        terminal_prices = pd.DataFrame(ST, columns=tickersC)
-        terminal_returns = terminal_prices.div(S0C.reindex(tickersC), axis=1) - 1.0
+    # Build charts
+    equity_fig = make_equity_curve(cum_port, cum_bench, "Portfolio", bench_label)
+    frontier_fig = make_frontier_chart(
+        frontier_df, (gmv_vol, gmv_ret), (tan_vol, tan_ret),
+        (sel_vol, sel_ret), rf_rate
+    )
+    weights_fig = make_weights_chart(weights, f"Weights — {method}")
+    corr_fig = make_correlation_heatmap(rets.corr())
+    dd_fig = make_drawdown_chart(cum_port)
+    rolling_sr_fig = make_rolling_sharpe(port_ret, rf_rate)
 
-        E = terminal_returns.mean(axis=0)
-        logE = np.log1p(terminal_returns).mean(axis=0)
-        cvar05 = compute_cvar(terminal_returns, alpha=0.05)
+    st.session_state["results"] = {
+        "tickers": tickers,
+        "prices": prices,
+        "rets": rets,
+        "weights": weights,
+        "port_ret": port_ret,
+        "bench_ret": bench_ret.reindex(port_ret.index).fillna(0),
+        "cum_port": cum_port,
+        "cum_bench": cum_bench,
+        "metrics_df": metrics_df,
+        "frontier_df": frontier_df,
+        "gmv_point": (gmv_vol, gmv_ret),
+        "tan_point": (tan_vol, tan_ret),
+        "sel_point": (sel_vol, sel_ret),
+        "ff_results": ff_results,
+        "calc_steps": calc_steps,
+        "equity_fig": equity_fig,
+        "frontier_fig": frontier_fig,
+        "weights_fig": weights_fig,
+        "corr_fig": corr_fig,
+        "dd_fig": dd_fig,
+        "rolling_sr_fig": rolling_sr_fig,
+        "method": method,
+        "mu_ann": mu_ann,
+        "sigma_ann": sigma_ann,
+        "rf_rate": rf_rate,
+    }
 
-        if objective == "Max E[VT]":
-            asset_score = E
-        elif objective == "Max E[log(VT)]":
-            asset_score = logE
-        else:
-            asset_score = E - float(risk_lambda) * (-cvar05)
-
-        # Select top N
-        top = asset_score.sort_values(ascending=False).head(int(min(target_n, len(asset_score)))).index.tolist()
-        if len(top) < 2:
-            raise RuntimeError("Top selection produced fewer than 2 assets.")
-
-        status.write(f"✔ Top {len(top)} selected for horizon {years_fwd}Y (objective: {objective})")
-
-        # 6/7 — Optimize weights (Optimization mode) or optimized weights (Custom mode)
-        status.write("6/7 — Weight optimization / initialization")
-
-        term_top = terminal_prices[top]
-        S0_top = S0C.reindex(top)
-
-        w_opt, best_obj = optimize_weights_terminal(
-            term_prices=term_top,
-            S0=S0_top,
-            iters=int(iters),
-            seed=123,
-            objective=objective,
-            risk_lambda=float(risk_lambda),
-            rf=float(rf_scen),
-            years=float(years_fwd),
-        )
-
-        w_opt = _normalize_weights(w_opt.reindex(top).fillna(0.0))
-
-        # Initialize live weights in session (final weights start = optimal)
-        st.session_state["w_live"] = w_opt.copy()
-        st.session_state["w_live_tickers"] = top.copy()
-
-        # 7/7 — Build full analytics with final weights (initially = w_opt)
-        status.write("7/7 — Building tables, equity curve, projection, metrics, PDFs")
-
-        # Historical series
-        prices10 = prices[top].copy()
-        returns10, mu10_daily, cov10_daily = compute_returns(prices10)
-
-        # Benchmark returns aligned
-        bench_ret = bench_px["SPY"].pct_change().dropna()
-        returns10_aligned = returns10.join(bench_ret.rename("SPY"), how="inner")
-        bench_ret = returns10_aligned["SPY"]
-        returns10_aligned = returns10_aligned.drop(columns=["SPY"])
-
-
-        # Scenario mu for top (from candidates)
-        mu_top_scen = mu_smart_C.reindex(top)
-
-        # Re-run MC on top for stable trajectory
-        sigma10, corr10 = compute_sigma_and_corr(returns10, vol_mult=vol_mult, corr_shrink=corr_shrink)
-        S0_10 = prices10.iloc[-1].astype(float)
-
-        S_paths_10, tickers10 = mc_paths_gbm_corr(
-            S0=S0_10.reindex(top),
-            mu=mu_top_scen.reindex(top),
-            sigma=sigma10,
-            corr=corr10,
-            years=float(years_fwd),
-            steps_per_year=TRADING_DAYS,
-            n_sims=int(n_sims),
-            seed=7
-        )
-
-        # initial final weights = optimal at run time
-        w_final = st.session_state["w_live"].copy()
-
-        port_ret_hist, cum_hist = portfolio_series(returns10_aligned, w_final)
-        bench_cum = (1 + bench_ret).cumprod()
-
-        V0 = float(cum_hist.iloc[-1])
-
-        V_paths = portfolio_projection_from_asset_paths(
-            S_paths=S_paths_10,
-            tickers=tickers10,
-            S0=S0_10.reindex(tickers10),
-            weights=w_final,
-            V0=V0
-        )
-
-        V_med = np.median(V_paths, axis=0)
-        V_p05 = np.percentile(V_paths, 5, axis=0)
-        V_p95 = np.percentile(V_paths, 95, axis=0)
-
-        hist_idx = cum_hist.index
-        future_idx = pd.bdate_range(hist_idx[-1] + pd.Timedelta(days=1), periods=len(V_med) - 1)
-
-        # Correlation matrix (historical) incl benchmark
-        corr_assets = returns10_aligned.copy()
-        corr_assets["SPY"] = bench_ret
-        corr_hist = corr_assets.corr()
-
-        # Fundamentals + scenario stats
-        fund10 = fetch_fundamentals_yf(top)
-
-        mu_annual_hist = (1 + returns10_aligned.mean()) ** TRADING_DAYS - 1
-        sig_annual_hist = returns10_aligned.std() * np.sqrt(TRADING_DAYS)
-
-        # Terminal return stats
-        terminal_prices_top = pd.DataFrame(S_paths_10[:, -1, :], columns=tickers10)
-        terminal_returns_top = terminal_prices_top.div(S0_10.reindex(tickers10), axis=1) - 1.0
-        E_top = terminal_returns_top.mean(axis=0)
-        Vol_top = terminal_returns_top.std(axis=0)
-        CVaR_top = compute_cvar(terminal_returns_top, alpha=0.05)
-
-        # Table details
-        rows = []
-        for t in top:
-            j = tickers10.index(t)
-            term_p = S_paths_10[:, -1, j]
-            rows.append({
-                "Ticker": t,
-                "Weight_FINAL": float(w_final[t]),
-                "Weight_OPT": float(w_opt[t]),
-                "LastPrice": float(S0_10[t]),
-                "Mu_Ann_Scenario": float(mu_top_scen[t]),
-                f"E[Ret]_{years_fwd}Y": float(E_top[t]),
-                f"Vol[Ret]_{years_fwd}Y": float(Vol_top[t]),
-                f"CVaR5%[Ret]_{years_fwd}Y": float(CVaR_top[t]),
-                "ExpReturn_Ann_Hist": float(mu_annual_hist[t]),
-                "Vol_Ann_Hist": float(sig_annual_hist[t]),
-                f"ForecastPrice_{years_fwd}Y_P05": float(np.percentile(term_p, 5)),
-                f"ForecastPrice_{years_fwd}Y_Med": float(np.percentile(term_p, 50)),
-                f"ForecastPrice_{years_fwd}Y_P95": float(np.percentile(term_p, 95)),
-            })
-
-        forecast_df = pd.DataFrame(rows).set_index("Ticker")
-        capm_df = capm_by_asset(asset_rets=returns10[top], mkt_rets=bench_ret, rf_annual=float(rf_scen), erp_annual=float(erp_scen))
-        table_details = fund10.join(forecast_df, how="right")
-        table_details = table_details.join(capm_df, how="left")
-
-        # Metrics
-        cagr = float(cum_hist.iloc[-1] ** (TRADING_DAYS / len(cum_hist)) - 1)
-        vol_ann = float(port_ret_hist.std(ddof=0) * np.sqrt(TRADING_DAYS))
-        sharpe = sharpe_ratio(port_ret_hist, rf_scen)
-        sortino = sortino_ratio(port_ret_hist, rf_scen)
-        mdd = max_drawdown(cum_hist)
-        beta, alpha_ann = beta_alpha_vs_benchmark(port_ret_hist, bench_ret, rf_scen)
+    st.success("✅ Analysis complete! Browse the tabs below.")
 
 
-        var95_p = var_parametric(port_ret_hist, 0.05)
-        var99_p = var_parametric(port_ret_hist, 0.01)
-        var95_h = var_historical(port_ret_hist, 0.05)
-        cvar95 = cvar_historical(port_ret_hist, 0.05)
-        cvar99 = cvar_historical(port_ret_hist, 0.01)
+# ============================================================
+# DISPLAY RESULTS
+# ============================================================
+R = st.session_state.get("results")
 
-        metrics_perf = pd.DataFrame({
-            "Metric": [
-                "CAGR", "Volatility (ann.)", "Sharpe Ratio", "Sortino Ratio",
-                "Beta", "Alpha (ann.)",
-                "Max Drawdown"
+# ── TAB 1: Planning ─────────────────────────────────────────
+with tab1:
+    if R is None:
+        st.info("👈 Configure your parameters in the sidebar and click **Run Analysis**.")
+        st.markdown("""
+        ### About this Application
+        This application implements the **three-step asset allocation framework** from the course:
+        
+        **Step 1 — Planning:** Define investment objectives, select asset universe, set benchmark and capital market expectations.
+        
+        **Step 2 — Execution:** Apply one of several portfolio optimization methodologies (Markowitz, Elton-Gruber, Merton, Black-Litterman, Smart-Beta strategies).
+        
+        **Step 3 — Feedback:** Evaluate portfolio performance using all course metrics (Sharpe, Sortino, Treynor, Jensen's Alpha, Fama-French regression, etc.)
+        
+        ---
+        **Supported optimization methods:**
+        - 📐 Markowitz MVO (Max Sharpe & Min Variance)
+        - 📐 Elton-Gruber Tangency Portfolio
+        - 📐 Merton Two-Fund Separation
+        - 🧠 Black-Litterman (with manual investor views)
+        - 📊 Equal Weight / Momentum / Low-Volatility (Smart-Beta)
+        """)
+    else:
+        st.markdown('<div class="section-title">Asset Universe & Capital Market Expectations</div>',
+                    unsafe_allow_html=True)
+
+        tickers = R["tickers"]
+        rets = R["rets"]
+        mu_ann = R["mu_ann"]
+        sigma_ann = R["sigma_ann"]
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            kpi_card("Assets Selected", str(len(tickers)))
+        with c2:
+            kpi_card("Start Date", str(start_date))
+        with c3:
+            kpi_card("End Date", str(end_date))
+        with c4:
+            kpi_card("Benchmark", bench_label.split("(")[0].strip())
+
+        st.markdown('<div class="section-title">Expected Returns & Risk (Annualised)</div>',
+                    unsafe_allow_html=True)
+        cme_df = pd.DataFrame({
+            "Ticker": tickers,
+            "Exp. Return (ann.)": [f"{r:.2%}" for r in mu_ann],
+            "Volatility (ann.)": [f"{v:.2%}" for v in np.sqrt(np.diag(sigma_ann))],
+            "Sharpe (individual)": [
+                f"{(mu_ann[i] - rf_rate) / (np.sqrt(sigma_ann[i, i]) + 1e-10):.3f}"
+                for i in range(len(tickers))
             ],
-            "Value": [
-                f"{cagr:.2%}",
-                f"{vol_ann:.2%}",
-                f"{sharpe:.3f}",
-                f"{sortino:.3f}",
-                f"{beta:.3f}",
-                f"{alpha_ann:.2%}",
-                f"{abs(mdd):.2%}",
-            ]
         })
+        st.dataframe(cme_df, use_container_width=True, hide_index=True)
 
-        metrics_risk = pd.DataFrame({
-            "Metric": ["VaR 95% (Parametric)", "VaR 99% (Parametric)", "VaR 95% (Historical)", "CVaR 95%", "CVaR 99%"],
-            "Value": [f"{var95_p:.2%}", f"{var99_p:.2%}", f"{var95_h:.2%}", f"{cvar95:.2%}", f"{cvar99:.2%}"]
-        })
+        st.markdown('<div class="section-title">Correlation Matrix</div>',
+                    unsafe_allow_html=True)
+        st.plotly_chart(R["corr_fig"], use_container_width=True)
 
-        # PDFs (images via matplotlib)
-        eq_png = _matplotlib_save_equity_png(hist_idx, cum_hist, future_idx, V_med, V_p05, V_p95)
-        corr_png = _matplotlib_save_corr_png(corr_hist, "Correlation matrix (historical)")
+        if show_calcs:
+            with st.expander("📐 Covariance Matrix (Σ) — Annual", expanded=False):
+                cov_df = pd.DataFrame(sigma_ann, index=tickers, columns=tickers)
+                st.dataframe(cov_df.style.background_gradient(cmap="YlOrRd"), use_container_width=True)
 
-        params = {
-            "Mode": mode,
-            "Indexes": ", ".join(universe_choice) if mode == "Optimization (S&P)" else "Custom",
-            "Objective": objective,
-            "Horizon": f"{years_fwd} years",
-            "Scenario": scenario,
-            "rf": f"{rf_scen:.2%}",
-            "ERP": f"{erp_scen:.2%}",
-            "Vol multiplier": f"{vol_mult:.2f}",
-            "Corr shrink": f"{corr_shrink:.2f}",
-            "Simulations": f"{n_sims}",
+
+# ── TAB 2: Optimization ─────────────────────────────────────
+with tab2:
+    if R is None:
+        st.info("👈 Run the analysis first.")
+    else:
+        st.markdown(f'<div class="section-title">{R["method"]}</div>',
+                    unsafe_allow_html=True)
+
+        # Method explanation
+        method_explanations = {
+            "Markowitz MVO (Max Sharpe)": {
+                "desc": "Maximizes the Sharpe Ratio by finding the tangency portfolio on the efficient frontier. "
+                        "This is the portfolio that offers the best risk-adjusted return.",
+                "formula": "max  (w'μ - Rf) / √(w'Σw)   s.t.  Σwᵢ = 1,  wᵢ ≥ 0",
+                "ref": "Markowitz (1952) — Portfolio Selection, Journal of Finance"
+            },
+            "Markowitz MVO (Min Variance)": {
+                "desc": "Finds the Global Minimum Variance (GMV) portfolio — the leftmost point of the efficient frontier. "
+                        "Ideal for risk-averse investors prioritizing stability over return.",
+                "formula": "min  w'Σw   s.t.  Σwᵢ = 1,  wᵢ ≥ 0",
+                "ref": "Markowitz (1952) — Portfolio Selection, Journal of Finance"
+            },
+            "Elton-Gruber (Tangency)": {
+                "desc": "Elton & Gruber (1977) simplified Markowitz by providing a closed-form solution for the "
+                        "tangency portfolio using the inverse covariance matrix.",
+                "formula": "z = Σ⁻¹·(μ - Rf)   →   w* = z / Σzᵢ",
+                "ref": "Elton & Gruber (1977) — Modern Portfolio Theory and Investment Analysis"
+            },
+            "Merton Two-Fund": {
+                "desc": "Merton's Separation Theorem states that any efficient portfolio can be expressed as "
+                        "a linear combination of the GMV portfolio and the Tangency portfolio. "
+                        "The mixing parameter α is calibrated to your target return.",
+                "formula": "w* = α·w_tan + (1-α)·w_gmv   where   α = (μ_target - μ_gmv) / (μ_tan - μ_gmv)",
+                "ref": "Merton (1969) — Lifetime Portfolio Selection, Review of Economics and Statistics"
+            },
+            "Black-Litterman": {
+                "desc": "Black-Litterman blends CAPM equilibrium returns with analyst views via Bayesian updating. "
+                        "Views can be absolute (stock X will return Y%) or relative (X will outperform Y by Z%).",
+                "formula": "μ_BL = [(τΣ)⁻¹ + P'Ω⁻¹P]⁻¹ · [(τΣ)⁻¹Π + P'Ω⁻¹Q]",
+                "ref": "Black & Litterman (1992) — Global Portfolio Optimization, Financial Analysts Journal"
+            },
+            "Equal Weight": {
+                "desc": "Naive 1/N diversification. Despite its simplicity, this strategy often performs "
+                        "competitively as a benchmark for more sophisticated methods.",
+                "formula": "wᵢ = 1/N   for all i",
+                "ref": "DeMiguel et al. (2009) — Optimal Versus Naive Diversification"
+            },
+            "Momentum": {
+                "desc": "Smart-beta strategy that overweights recent winners and underweights recent losers, "
+                        "exploiting the momentum anomaly documented by Carhart (1997).",
+                "formula": "w ∝ rank(return₋₁₂₆ days)²,  top quartile doubled, bottom quartile halved",
+                "ref": "Carhart (1997) — On Persistence in Mutual Fund Performance"
+            },
+            "Low Volatility": {
+                "desc": "Smart-beta strategy that inverts the CAPM prediction: lower-volatility stocks "
+                        "tend to earn higher risk-adjusted returns (low-vol anomaly).",
+                "formula": "wᵢ ∝ 1/σᵢ   (inverse volatility weighting)",
+                "ref": "Baker, Bradley & Wurgler (2011) — Benchmarks as Limits to Arbitrage"
+            },
         }
 
-        pdf_summary = build_pdf_summary(
-            title="Portfolio Summary",
-            params=params,
-            weights_opt=w_opt,
-            weights_final=w_final,
-            metrics_perf=metrics_perf,
-            metrics_risk=metrics_risk
-        )
+        expl = method_explanations.get(R["method"], {})
+        if expl:
+            with st.container():
+                st.markdown(f"""<div class="method-card">
+                    <strong>{R["method"]}</strong><br/>
+                    <span style="color:#64748B;font-size:0.9rem;">{expl.get('desc','')}</span>
+                    <div class="formula-box">{expl.get('formula','')}</div>
+                    <span style="font-size:0.8rem;color:#94A3B8;">📚 {expl.get('ref','')}</span>
+                </div>""", unsafe_allow_html=True)
 
-        pdf_full = build_pdf_full_report(
-            title="Portfolio Full Report",
-            params=params,
-            weights_opt=w_opt,
-            weights_final=w_final,
-            equity_png=eq_png,
-            corr_png=corr_png,
-            metrics_perf=metrics_perf,
-            metrics_risk=metrics_risk,
-            details_table=table_details
-        )
+        # Efficient Frontier
+        st.markdown('<div class="section-title">Efficient Frontier</div>',
+                    unsafe_allow_html=True)
+        st.plotly_chart(R["frontier_fig"], use_container_width=True)
 
-        # Persist results
-        st.session_state["prices"] = prices
-        st.session_state["returns10"] = returns10_aligned
-        st.session_state["top"] = top
-        st.session_state["w_opt"] = w_opt
-        st.session_state["w_final"] = w_final
-        st.session_state["fund10"] = fund10
-        st.session_state["table_details"] = table_details
-        st.session_state["cum_hist"] = cum_hist
-        st.session_state["port_ret_hist"] = port_ret_hist
-        st.session_state["V_med"] = V_med
-        st.session_state["V_p05"] = V_p05
-        st.session_state["V_p95"] = V_p95
-        st.session_state["future_idx"] = future_idx
-        st.session_state["corr_hist"] = corr_hist
-        st.session_state["bench_cum"] = bench_cum
-        st.session_state["bench_ret"] = bench_ret
-        st.session_state["metrics_perf"] = metrics_perf
-        st.session_state["metrics_risk"] = metrics_risk
-        st.session_state["pdf_summary_bytes"] = pdf_summary
-        st.session_state["pdf_full_bytes"] = pdf_full
+        # Portfolio Weights
+        st.markdown('<div class="section-title">Optimal Portfolio Weights</div>',
+                    unsafe_allow_html=True)
+        col_w1, col_w2 = st.columns([1.3, 1])
+        with col_w1:
+            st.plotly_chart(R["weights_fig"], use_container_width=True)
+        with col_w2:
+            w_table = R["weights"].sort_values(ascending=False)
+            w_table_df = pd.DataFrame({
+                "Ticker": w_table.index,
+                "Weight": [f"{v:.2%}" for v in w_table.values],
+            })
+            st.dataframe(w_table_df, use_container_width=True, hide_index=True)
 
-        # IMPORTANT: stop re-running automatically
-        st.session_state["do_run"] = False
+            # Key portfolio stats
+            sel_ret, sel_vol, sel_sr = portfolio_stats(
+                R["weights"].values, R["mu_ann"], R["sigma_ann"]
+            )
+            st.markdown("**Portfolio Statistics**")
+            st.markdown(f"""
+            | Metric | Value |
+            |--------|-------|
+            | Expected Return | {sel_ret:.2%} |
+            | Volatility | {sel_vol:.2%} |
+            | Sharpe Ratio | {sel_sr:.3f} |
+            """)
 
-        status.update(label="✅ Done", state="complete", expanded=False)
+        # Intermediate calculations
+        if show_calcs and R["calc_steps"]:
+            st.markdown('<div class="section-title">🔬 Intermediate Calculations (Professor Review)</div>',
+                        unsafe_allow_html=True)
+            for step_name, step_val in R["calc_steps"].items():
+                with st.expander(f"📐 {step_name}", expanded=False):
+                    if isinstance(step_val, np.ndarray):
+                        if step_val.ndim == 1:
+                            df_step = pd.DataFrame(
+                                {"Asset": R["tickers"][:len(step_val)], step_name: step_val}
+                            )
+                            st.dataframe(df_step, use_container_width=True, hide_index=True)
+                        elif step_val.ndim == 2:
+                            df_step = pd.DataFrame(step_val,
+                                                    index=R["tickers"][:step_val.shape[0]],
+                                                    columns=R["tickers"][:step_val.shape[1]])
+                            st.dataframe(df_step.style.background_gradient(cmap="coolwarm"),
+                                         use_container_width=True)
+                    elif isinstance(step_val, float):
+                        st.metric(step_name, f"{step_val:.6f}")
+                    else:
+                        st.write(step_val)
 
-    except Exception as e:
-        st.session_state["do_run"] = False
-        status.update(label="❌ Error during execution", state="error", expanded=True)
-        st.exception(e)
 
+# ── TAB 3: Performance ──────────────────────────────────────
+with tab3:
+    if R is None:
+        st.info("👈 Run the analysis first.")
+    else:
+        metrics_df = R["metrics_df"]
 
-# ============================================================
-# UI — Display (uses stored results; no recompute on +/- clicks)
-# ============================================================
-if st.session_state.get("top") is not None and st.session_state.get("prices") is not None:
-    top = st.session_state["top"]
-    w_opt = st.session_state["w_opt"].copy()
+        # KPI row
+        st.markdown('<div class="section-title">Key Performance Indicators</div>',
+                    unsafe_allow_html=True)
 
-    # Ensure w_live exists
-    if "w_live" not in st.session_state or st.session_state.get("w_live_tickers") != top:
-        st.session_state["w_live"] = _normalize_weights(w_opt.copy())
-        st.session_state["w_live_tickers"] = top.copy()
+        m_dict = dict(zip(metrics_df["Metric"], metrics_df["Value"]))
 
-    # --- 1) Portfolio weights + +/- controls
-    st.subheader("1) Portfolio (assets + weights)")
-    c1, c2 = st.columns([1, 2])
-
-    with c1:
-        st.write(f"**Mode:** {mode}")
-        st.write(f"**Objective:** {objective}")
-        st.write(f"**Horizon:** {years_fwd} year(s)")
-        st.write("**Optimized weights (baseline)**")
-        st.dataframe(w_opt.sort_values(ascending=False).to_frame("Weight_OPT"), use_container_width=True)
-
-    def _apply_click(ticker: str, direction: int):
-        w = st.session_state["w_live"].reindex(top).fillna(0.0).copy()
-        step = float(w_step)
-        new_val = float(np.clip(float(w[ticker]) + direction * step, 0.0, 1.0))
-        st.session_state["w_live"] = rebalance_equal_others(w, changed=ticker, new_value=new_val)
-
-    with c2:
-        st.write("Adjust weights with +/- (delta equally redistributed across other assets):")
-        w_live = _normalize_weights(st.session_state["w_live"].reindex(top).fillna(0.0))
-
-        # Controls table-like layout
-        header = st.columns([2.2, 1.0, 0.8, 0.8])
-        header[0].markdown("**Ticker**")
-        header[1].markdown("**Current**")
-        header[2].markdown("**-**")
-        header[3].markdown("**+**")
-
-        for t in top:
-            row = st.columns([2.2, 1.0, 0.8, 0.8])
-            row[0].write(t)
-            row[1].write(f"{w_live[t]:.4f}")
-
-            row[2].button("−", key=f"minus_{t}", on_click=_apply_click, args=(t, -1), use_container_width=True)
-            row[3].button("+", key=f"plus_{t}", on_click=_apply_click, args=(t, +1), use_container_width=True)
-
-        w_final = _normalize_weights(st.session_state["w_live"].reindex(top).fillna(0.0))
-        st.session_state["w_final"] = w_final
-
-        st.write("**Final weights**")
-        st.dataframe(w_final.sort_values(ascending=False).to_frame("Weight_FINAL"), use_container_width=True)
-
-    # --- Recompute downstream views based on w_final ONLY (no yfinance calls)
-    prices = st.session_state["prices"]
-    returns10 = st.session_state["returns10"]
-    bench_ret = st.session_state["bench_ret"]
-
-    port_ret_hist, cum_hist = portfolio_series(returns10, st.session_state["w_final"])
-    bench_cum = (1 + bench_ret.loc[returns10.index]).cumprod()
-
-    # --- 2) Interactive equity curve + projection horizon
-    st.subheader("2) Equity Curve (interactive)")
-    cagr = float(cum_hist.iloc[-1] ** (TRADING_DAYS / len(cum_hist)) - 1)
-    vol_ann = float(port_ret_hist.std(ddof=0) * np.sqrt(TRADING_DAYS))
-    sharpe = sharpe_ratio(port_ret_hist, rf_scen)
-    mdd = max_drawdown(cum_hist)
-
-    # Projection arrays from previous MC run (kept stable)
-    V_med = st.session_state.get("V_med")
-    V_p05 = st.session_state.get("V_p05")
-    V_p95 = st.session_state.get("V_p95")
-    future_idx = st.session_state.get("future_idx")
-
-    # Build Plotly figure (historical + projection band + benchmark)
-    fig = go.Figure()
-
-    # Historical normalized to 100
-    hist_base = 100.0
-    port_hist_plot = (cum_hist / cum_hist.iloc[0]) * hist_base
-    bench_hist_plot = (bench_cum / bench_cum.iloc[0]) * hist_base
-
-    fig.add_trace(go.Scatter(
-        x=port_hist_plot.index, y=port_hist_plot.values,
-        mode="lines", name="Portfolio (hist.)"
-    ))
-    fig.add_trace(go.Scatter(
-        x=bench_hist_plot.index, y=bench_hist_plot.values,
-        mode="lines", name="Benchmark (SPY)"
-    ))
-
-    # Forward projection to horizon (base = last hist point)
-    if future_idx is not None and V_med is not None:
-        last = float(port_hist_plot.iloc[-1])
-        proj_med = last * (V_med[1:] / V_med[0])
-        proj_p05 = last * (V_p05[1:] / V_p05[0])
-        proj_p95 = last * (V_p95[1:] / V_p95[0])
-
-        fig.add_trace(go.Scatter(
-            x=future_idx, y=proj_med,
-            mode="lines", name=f"Projection median ({years_fwd}Y)", line=dict(dash="dash")
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=np.concatenate([future_idx.values, future_idx.values[::-1]]),
-            y=np.concatenate([proj_p95, proj_p05[::-1]]),
-            fill="toself",
-            name="Projection band (5%-95%)",
-            opacity=0.25,
-            line=dict(width=0),
-            showlegend=True
-        ))
-
-    fig.update_layout(
-        height=450,
-        margin=dict(l=20, r=20, t=30, b=20),
-        xaxis_title="Date",
-        yaxis_title="Index (base 100)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # KPI row (as in your screenshot)
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("CAGR", f"{cagr:.2%}")
-    k2.metric("Volatility", f"{vol_ann:.2%}")
-    k3.metric("Sharpe Ratio", f"{sharpe:.3f}")
-    k4.metric("Max Drawdown", f"{abs(mdd):.2%}")
-
-    # --- 2bis) Correlation matrix with coefficients INSIDE cells
-    st.subheader("2bis) Correlation matrix (historical)")
-    corr_hist = st.session_state["corr_hist"].copy()
-
-    # Keep SPY at end if present
-    if "SPY" in corr_hist.columns:
-        cols = [c for c in corr_hist.columns if c != "SPY"] + ["SPY"]
-        corr_hist = corr_hist.loc[cols, cols]
-
-    corr_fig = plot_corr_heatmap_with_text(corr_hist, "Correlation matrix (historical)")
-    st.plotly_chart(corr_fig, use_container_width=True)
-    st.caption("Note: SPY is used as S&P 500 benchmark proxy.")
-
-    # --- 3) Performance & Risk metrics (recomputed with new weights)
-    st.subheader("3) Performance & Risk Metrics")
-    beta, alpha_ann = beta_alpha_vs_benchmark(port_ret_hist, bench_ret.loc[returns10.index], rf_scen)
-
-    metrics_perf = pd.DataFrame({
-        "Metric": ["Sortino Ratio", "Beta", "Alpha (annual)", "Treynor Ratio", "Information Ratio"],
-        "Value": [
-            f"{sortino_ratio(port_ret_hist, rf_scen):.3f}",
-            f"{beta:.3f}",
-            f"{alpha_ann:.2%}",
-            f"{( (port_ret_hist.mean() * TRADING_DAYS) / (beta + 1e-12) ):.3f}",
-            f"{((port_ret_hist - bench_ret.loc[returns10.index]).mean() / ((port_ret_hist - bench_ret.loc[returns10.index]).std(ddof=0)+1e-12) * np.sqrt(TRADING_DAYS)):.3f}",
+        cols = st.columns(4)
+        metrics_to_show = [
+            ("Annualised Return", "Annualised Return"),
+            ("Sharpe Ratio", "Sharpe Ratio"),
+            ("Max Drawdown", "Max Drawdown"),
+            ("Jensen's Alpha (ann.)", "Jensen's Alpha"),
         ]
-    })
+        for col, (k, label) in zip(cols, metrics_to_show):
+            with col:
+                val = m_dict.get(k, "—")
+                color = ""
+                if "%" in str(val):
+                    try:
+                        num = float(str(val).replace("%", ""))
+                        color = "positive" if num > 0 else "negative"
+                    except Exception:
+                        pass
+                kpi_card(label, val, color)
 
-    metrics_risk = pd.DataFrame({
-        "Metric": ["VaR 95% (Parametric)", "VaR 99% (Parametric)", "VaR 95% (Historical)", "CVaR 95%", "CVaR 99%"],
-        "Value": [
-            f"{var_parametric(port_ret_hist, 0.05):.2%}",
-            f"{var_parametric(port_ret_hist, 0.01):.2%}",
-            f"{var_historical(port_ret_hist, 0.05):.2%}",
-            f"{cvar_historical(port_ret_hist, 0.05):.2%}",
-            f"{cvar_historical(port_ret_hist, 0.01):.2%}",
+        st.markdown("")
+        cols2 = st.columns(4)
+        m2 = [
+            ("Sortino Ratio", "Sortino Ratio"),
+            ("Treynor Ratio", "Treynor Ratio"),
+            ("Information Ratio", "Information Ratio"),
+            ("Calmar Ratio", "Calmar Ratio"),
         ]
-    })
+        for col, (k, label) in zip(cols2, m2):
+            with col:
+                kpi_card(label, m_dict.get(k, "—"))
 
-    a, b = st.columns(2)
-    with a:
-        st.markdown("**Performance Metrics**")
-        st.dataframe(metrics_perf, use_container_width=True)
-    with b:
-        st.markdown("**Risk Metrics**")
-        st.dataframe(metrics_risk, use_container_width=True)
+        st.markdown('<div class="section-title">Equity Curve vs Benchmark</div>',
+                    unsafe_allow_html=True)
+        st.plotly_chart(R["equity_fig"], use_container_width=True)
 
-    # --- 4) Portfolio details table (weights updated)
-    st.subheader("4) Portfolio details (table)")
-    table_details = st.session_state["table_details"].copy()
-    table_details["Weight_FINAL"] = st.session_state["w_final"].reindex(table_details.index).fillna(0.0)
-    table_details["Weight_OPT"] = st.session_state["w_opt"].reindex(table_details.index).fillna(0.0)
-    # Bring weights columns first
-    cols = ["Weight_FINAL", "Weight_OPT"] + [c for c in table_details.columns if c not in ["Weight_FINAL", "Weight_OPT"]]
-    table_details = table_details[cols]
-    st.dataframe(table_details, use_container_width=True)
+        col_dd, col_rs = st.columns(2)
+        with col_dd:
+            st.plotly_chart(R["dd_fig"], use_container_width=True)
+        with col_rs:
+            st.plotly_chart(R["rolling_sr_fig"], use_container_width=True)
 
-    # --- Export section (PDFs rebuilt with updated weights + updated equity/corr images)
-    st.subheader("5) Export")
-    e1, e2, e3 = st.columns([1, 1, 1])
+        st.markdown('<div class="section-title">Full Metrics Table (S9 — Performance Evaluation)</div>',
+                    unsafe_allow_html=True)
 
-    # CSV weights
-    weights_csv = pd.DataFrame({
-        "Ticker": top,
-        "Weight_OPT": st.session_state["w_opt"].reindex(top).values,
-        "Weight_FINAL": st.session_state["w_final"].reindex(top).values
-    })
-    csv_bytes = weights_csv.to_csv(index=False).encode("utf-8")
+        if show_calcs:
+            st.markdown("""
+            <div class="formula-box">
+            Sharpe = (Rp - Rf) / σp  ·  Sortino = (Rp - Rf) / σ_downside  ·  
+            Treynor = (Rp - Rf) / βp  ·  IR = (Rp - Rb) / TE  ·  
+            Jensen's α = Rp - [Rf + βp·(Rm - Rf)]  ·  Calmar = CAGR / |Max DD|
+            </div>
+            """, unsafe_allow_html=True)
 
-    with e1:
-        st.download_button(
-            "Download portfolio weights (CSV)",
-            data=csv_bytes,
-            file_name="portfolio_weights.csv",
-            mime="text/csv"
+        st.dataframe(metrics_df, use_container_width=True, hide_index=True)
+
+        # Multi-strategy comparison
+        st.markdown('<div class="section-title">Strategy Comparison</div>',
+                    unsafe_allow_html=True)
+        with st.expander("📊 Compare all strategies side-by-side", expanded=False):
+            with st.spinner("Computing all strategies…"):
+                comp_rows = []
+                strats = {
+                    "Max Sharpe": pd.Series(tangency_portfolio(R["mu_ann"], R["sigma_ann"], R["rf_rate"]), index=R["tickers"]),
+                    "Min Variance": pd.Series(gmv_portfolio(R["sigma_ann"]), index=R["tickers"]),
+                    "Equal Weight": equal_weight(R["tickers"]),
+                    "Momentum": momentum_weight(R["rets"]),
+                    "Low Volatility": low_volatility_weight(R["rets"]),
+                    "Selected": R["weights"],
+                }
+                for sname, sw in strats.items():
+                    sw = sw.clip(lower=0)
+                    sw = sw / sw.sum()
+                    pr = portfolio_returns(R["rets"], sw)
+                    cum = (1 + pr).cumprod()
+                    ann_r = (cum.iloc[-1]) ** (TRADING_DAYS / len(cum)) - 1
+                    ann_v = pr.std() * np.sqrt(TRADING_DAYS)
+                    sh = sharpe(pr, R["rf_rate"])
+                    mdd = abs(max_drawdown(cum))
+                    comp_rows.append({
+                        "Strategy": sname,
+                        "Ann. Return": f"{ann_r:.2%}",
+                        "Volatility": f"{ann_v:.2%}",
+                        "Sharpe": f"{sh:.3f}",
+                        "Max Drawdown": f"{mdd:.2%}",
+                        "Jensen's Alpha": f"{jensen_alpha(pr, R['bench_ret'], R['rf_rate']):.2%}",
+                    })
+
+                comp_df = pd.DataFrame(comp_rows)
+                st.dataframe(comp_df, use_container_width=True, hide_index=True)
+
+                # Radar chart
+                categories = ["Ann. Return", "Sharpe", "Sortino", "Calmar"]
+                fig_radar = go.Figure()
+                for row in comp_rows[:5]:
+                    fig_radar.add_trace(go.Scatterpolar(
+                        r=[float(str(row["Ann. Return"]).replace("%", "").replace("−", "-")),
+                           float(row["Sharpe"]),
+                           0, 0],  # placeholder
+                        theta=categories, fill="toself", name=row["Strategy"]
+                    ))
+                fig_radar.update_layout(title="Strategy Comparison",
+                                        polar=dict(radialaxis=dict(visible=True)),
+                                        height=400, **{k: v for k, v in PLOTLY_TEMPLATE.items()
+                                                       if k not in ["xaxis", "yaxis"]})
+                st.plotly_chart(fig_radar, use_container_width=True)
+
+
+# ── TAB 4: Factor Models ─────────────────────────────────────
+with tab4:
+    if R is None:
+        st.info("👈 Run the analysis first.")
+    else:
+        # CAPM
+        st.markdown('<div class="section-title">CAPM Analysis</div>',
+                    unsafe_allow_html=True)
+        if show_calcs:
+            st.markdown("""
+            <div class="formula-box">
+            CAPM:  E[Rᵢ] - Rf = βᵢ · (E[Rm] - Rf)
+            Jensen's Alpha:  αᵢ = Rᵢ_realized - E[Rᵢ]_CAPM
+            R² measures how much return variation is explained by the market factor
+            </div>
+            """, unsafe_allow_html=True)
+
+        tickers = R["tickers"]
+        rets = R["rets"]
+        bench_ret = R["bench_ret"]
+        rf_d = rf_rate / TRADING_DAYS
+        aligned = pd.concat([rets, bench_ret.rename("BENCH")], axis=1).dropna()
+
+        capm_rows = []
+        for t in tickers:
+            if t not in aligned.columns:
+                continue
+            y = aligned[t].values
+            X = aligned["BENCH"].values
+            x_var = np.var(X, ddof=1) + 1e-12
+            beta = float(np.cov(y, X, ddof=1)[0, 1] / x_var)
+            a = float(y.mean() - beta * X.mean())
+            y_hat = a + beta * X
+            r2 = float(1 - ((y - y_hat) ** 2).sum() / ((y - y.mean()) ** 2).sum())
+            ann_ret = float((1 + pd.Series(y)).prod() ** (TRADING_DAYS / len(y)) - 1)
+            capm_exp = rf_rate + beta * erp
+            alpha_ann = ann_ret - capm_exp
+            capm_rows.append({
+                "Ticker": t,
+                "Beta (β)": f"{beta:.3f}",
+                "CAPM Exp. Return": f"{capm_exp:.2%}",
+                "Realized Return": f"{ann_ret:.2%}",
+                "Jensen's Alpha": f"{alpha_ann:.2%}",
+                "R²": f"{r2:.3f}",
+            })
+
+        capm_df = pd.DataFrame(capm_rows)
+        st.dataframe(capm_df, use_container_width=True, hide_index=True)
+
+        # Security Market Line
+        betas = [float(r["Beta (β)"]) for r in capm_rows]
+        alphas = [float(r["Jensen's Alpha"].replace("%", "")) / 100 for r in capm_rows]
+        exp_rets = [float(r["CAPM Exp. Return"].replace("%", "")) / 100 for r in capm_rows]
+        real_rets = [float(r["Realized Return"].replace("%", "")) / 100 for r in capm_rows]
+
+        beta_range = np.linspace(min(min(betas), 0), max(max(betas), 2), 50)
+        sml_rets = rf_rate + beta_range * erp
+
+        fig_sml = go.Figure()
+        fig_sml.add_trace(go.Scatter(
+            x=beta_range, y=sml_rets * 100,
+            mode="lines", name="Security Market Line (SML)",
+            line=dict(color=ACCENT, width=2, dash="dash")
+        ))
+        fig_sml.add_trace(go.Scatter(
+            x=betas, y=[r * 100 for r in real_rets],
+            mode="markers+text", name="Assets (Realized)",
+            text=tickers, textposition="top center",
+            marker=dict(
+                size=10, color=[a * 1000 for a in alphas],
+                colorscale="RdYlGn", showscale=True,
+                colorbar=dict(title="Alpha (bps)"),
+                line=dict(color=DARK, width=1)
+            )
+        ))
+        fig_sml.update_layout(
+            title="📊 Security Market Line (CAPM) — Assets vs SML",
+            xaxis_title="Beta (β)", yaxis_title="Return (%)",
+            height=480, **PLOTLY_TEMPLATE
         )
+        st.plotly_chart(fig_sml, use_container_width=True)
 
-    # Rebuild PDFs with updated weights + updated metrics
-    params = {
-        "Mode": mode,
-        "Indexes": ", ".join(universe_choice) if mode == "Optimization (S&P)" else "Custom",
-        "Objective": objective,
-        "Horizon": f"{years_fwd} years",
-        "Scenario": scenario,
-        "rf": f"{rf_scen:.2%}",
-        "ERP": f"{erp_scen:.2%}",
-        "Vol multiplier": f"{vol_mult:.2f}",
-        "Corr shrink": f"{corr_shrink:.2f}",
-        "Simulations": f"{n_sims}",
-    }
+        # Fama-French
+        st.markdown('<div class="section-title">Fama-French 3-Factor Model</div>',
+                    unsafe_allow_html=True)
+        if show_calcs:
+            st.markdown("""
+            <div class="formula-box">
+            FF3:  Rₚ - Rf = α + β_MKT·(Rm - Rf) + β_SMB·SMB + β_HML·HML + ε
+            
+            MktRF = Market excess return  |  SMB = Small minus Big (size factor)
+            HML   = High minus Low B/M   (value factor)  |  α = abnormal return
+            </div>
+            """, unsafe_allow_html=True)
 
-    # PDF images updated (correlation WITH coefficients + equity curve with projection)
-    hist_idx = cum_hist.index
-    V0_last = float(cum_hist.iloc[-1])
+        ff_results = R.get("ff_results", {})
+        if ff_results:
+            col_ff1, col_ff2 = st.columns(2)
+            with col_ff1:
+                st.markdown("**Factor Loadings & Alpha**")
+                ff_display = {
+                    "Alpha (annualised)": f"{ff_results.get('Alpha (annualised)', 0):.2%}",
+                    "β Market (MktRF)": f"{ff_results.get('β_MktRF', 0):.3f}",
+                    "β Size (SMB)": f"{ff_results.get('β_SMB', 0):.3f}",
+                    "β Value (HML)": f"{ff_results.get('β_HML', 0):.3f}",
+                    "R²": f"{ff_results.get('R²', 0):.3f}",
+                    "Adj. R²": f"{ff_results.get('Adj. R²', 0):.3f}",
+                    "N observations": str(ff_results.get("N obs", "")),
+                }
+                ff_df = pd.DataFrame(list(ff_display.items()), columns=["Parameter", "Value"])
+                st.dataframe(ff_df, use_container_width=True, hide_index=True)
 
-    # For PDF, we use matplotlib images (if available)
-    # Projection arrays: V_med etc from initial MC, scaled in plot; image uses those arrays directly
-    eq_png = _matplotlib_save_equity_png(hist_idx, cum_hist, st.session_state.get("future_idx"),
-                                         st.session_state.get("V_med"), st.session_state.get("V_p05"), st.session_state.get("V_p95"))
+            with col_ff2:
+                st.markdown("**T-Statistics (|t| > 1.96 → significant at 5%)**")
+                t_display = {
+                    "t-stat Alpha": f"{ff_results.get('t_alpha', 0):.3f}",
+                    "t-stat MktRF": f"{ff_results.get('t_MktRF', 0):.3f}",
+                    "t-stat SMB": f"{ff_results.get('t_SMB', 0):.3f}",
+                    "t-stat HML": f"{ff_results.get('t_HML', 0):.3f}",
+                    "p-value Alpha": f"{ff_results.get('p_alpha', 1):.4f}",
+                }
+                t_df = pd.DataFrame(list(t_display.items()), columns=["Statistic", "Value"])
+                st.dataframe(t_df, use_container_width=True, hide_index=True)
 
-    # Correlation image WITH coefficients inside
-    corr_png = _matplotlib_save_corr_png(corr_hist, "Correlation matrix (historical)")
+            # Factor bar chart
+            fig_ff = go.Figure(go.Bar(
+                x=["Market (β_MKT)", "Size (β_SMB)", "Value (β_HML)"],
+                y=[ff_results.get("β_MktRF", 0),
+                   ff_results.get("β_SMB", 0),
+                   ff_results.get("β_HML", 0)],
+                marker_color=[ACCENT, SUCCESS, WARNING],
+                text=[f"{v:.3f}" for v in [ff_results.get("β_MktRF", 0),
+                                            ff_results.get("β_SMB", 0),
+                                            ff_results.get("β_HML", 0)]],
+                textposition="outside",
+            ))
+            fig_ff.add_hline(y=0, line_color=DARK)
+            fig_ff.update_layout(
+                title=f"📊 Fama-French Factor Exposures  |  Ann. Alpha = {ff_results.get('Alpha (annualised)', 0):.2%}  |  R² = {ff_results.get('R²', 0):.3f}",
+                yaxis_title="Factor Loading (β)",
+                height=380, **PLOTLY_TEMPLATE
+            )
+            st.plotly_chart(fig_ff, use_container_width=True)
 
-    pdf_summary = build_pdf_summary(
-        title="Portfolio Summary",
-        params=params,
-        weights_opt=st.session_state["w_opt"],
-        weights_final=st.session_state["w_final"],
-        metrics_perf=metrics_perf,
-        metrics_risk=metrics_risk
-    )
+            if show_calcs:
+                with st.expander("📐 Regression details (OLS formula & interpretation)"):
+                    st.markdown("""
+                    **OLS Estimation:**
+                    
+                    β = (X'X)⁻¹ X'y   where X = [1, MktRF, SMB, HML]
+                    
+                    **Interpretation:**
+                    - **β_MKT > 1** → portfolio amplifies market moves (aggressive)
+                    - **β_SMB > 0** → tilted toward small-cap stocks
+                    - **β_HML > 0** → tilted toward value stocks (high book-to-market)
+                    - **α > 0** → portfolio generates returns above what FF3 factors predict
+                    - **R²** → fraction of portfolio return variation explained by the three factors
+                    """)
+        else:
+            st.warning("Fama-French factor data not available for this period. Check your internet connection or try a different date range.")
 
-    pdf_full = build_pdf_full_report(
-        title="Portfolio Full Report",
-        params=params,
-        weights_opt=st.session_state["w_opt"],
-        weights_final=st.session_state["w_final"],
-        equity_png=eq_png,
-        corr_png=corr_png,
-        metrics_perf=metrics_perf,
-        metrics_risk=metrics_risk,
-        details_table=table_details
-    )
 
-    with e2:
-        st.download_button(
-            "Download summary report (PDF)",
-            data=pdf_summary,
-            file_name="portfolio_summary_report.pdf",
-            mime="application/pdf"
-        )
+# ── TAB 5: Report ────────────────────────────────────────────
+with tab5:
+    if R is None:
+        st.info("👈 Run the analysis first to generate the report.")
+    else:
+        st.markdown('<div class="section-title">📄 Export PDF Report</div>',
+                    unsafe_allow_html=True)
 
-    with e3:
-        st.download_button(
-            "Download full report (PDF)",
-            data=pdf_full,
-            file_name="portfolio_full_report.pdf",
-            mime="application/pdf"
-        )
+        st.markdown("""
+        The PDF report follows the three-step asset allocation structure required by the course:
+        
+        - **Step 1 — Planning**: Investment objectives, benchmark, capital market expectations
+        - **Step 2 — Execution**: Optimization methodology, intermediate calculations, portfolio weights, efficient frontier
+        - **Step 3 — Feedback**: Full performance evaluation with all course metrics, Fama-French analysis
+        """)
 
-else:
-    st.warning("Run the calculation from the sidebar to generate a portfolio.")
+        col_opt1, col_opt2 = st.columns(2)
+        with col_opt1:
+            include_calcs = st.toggle("Include intermediate calculations in PDF",
+                                       value=show_calcs,
+                                       help="Show calculation steps for professor review")
+        with col_opt2:
+            report_title_input = st.text_input("Portfolio Name", value="Global Equity Portfolio")
+
+        if st.button("📄 Generate Report", type="primary"):
+            with st.spinner("Building PDF report…"):
+                report_params_pdf = {
+                    "Portfolio Name": report_title_input,
+                    "Method": R["method"],
+                    "start": str(start_date),
+                    "end": str(end_date),
+                    "benchmark": bench_label,
+                    "rf": rf_rate,
+                    "ERP": erp,
+                    "n_assets": len(R["tickers"]),
+                    "Regions": ", ".join(region_choices),
+                }
+
+                pdf_bytes = build_pdf_report(
+                    report_params=report_params_pdf,
+                    weights=R["weights"],
+                    metrics_df=R["metrics_df"],
+                    method_name=R["method"],
+                    equity_fig=R["equity_fig"],
+                    frontier_fig=R["frontier_fig"],
+                    weights_fig=R["weights_fig"],
+                    corr_fig=R["corr_fig"],
+                    dd_fig=R["dd_fig"],
+                    rolling_sr_fig=R["rolling_sr_fig"],
+                    ff_results=R.get("ff_results"),
+                    show_calcs=include_calcs,
+                    calc_steps=R.get("calc_steps"),
+                )
+
+                st.download_button(
+                    label="⬇️ Download Full Portfolio Report (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"portfolio_report_{date.today()}.pdf",
+                    mime="application/pdf",
+                )
+                st.success("✅ Report ready for download!")
+
+        # Quick stats preview
+        st.markdown('<div class="section-title">Report Preview</div>',
+                    unsafe_allow_html=True)
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            st.markdown("**Portfolio Weights (Top 10)**")
+            w_preview = R["weights"].sort_values(ascending=False).head(10)
+            fig_pie = go.Figure(go.Pie(
+                labels=w_preview.index,
+                values=w_preview.values,
+                hole=0.4,
+                marker=dict(colors=px.colors.sequential.RdBu[:len(w_preview)])
+            ))
+            fig_pie.update_layout(
+                height=380, showlegend=True,
+                margin=dict(l=20, r=20, t=20, b=20),
+                paper_bgcolor="white"
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with col_p2:
+            st.markdown("**Performance Summary**")
+            st.dataframe(R["metrics_df"], use_container_width=True, hide_index=True)
